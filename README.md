@@ -1,6 +1,6 @@
 # DisplayProLite
 
-**Version: 0.1.0 — initial preview release.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
+**Version: 0.2.0 — workspace launch preview.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
 
 A local Windows desktop utility built with Tauri 2, Rust, TypeScript and native Windows APIs. Source lives in this project folder; no account or server is required.
 
@@ -13,17 +13,29 @@ The Tauri dashboard sends commands to a Rust backend. Native Windows APIs enumer
 ## Dashboard
 
 - **Monitor Configuration:** detected monitors, supported resolution/Hz combinations, primary display, enable/disable, and desktop X/Y placement. Apply changes with a 25-second automatic rollback. A separate helper restores the previous setup even if the dashboard crashes. Profiles are rejected when their connected monitor identities no longer match.
-- **Window Positions:** capture selected open windows into named profiles, optionally including the display setup. Restore normal, maximized and minimized placements. Closed or ambiguous windows are reported and skipped. Windows stranded by a disconnected monitor are moved back into view. This does not launch missing applications.
+- **Window Positions:** capture selected open windows into named profiles, optionally including the display setup. Restore normal, maximized and minimized placements. Closed or ambiguous windows are reported and skipped. Windows stranded by a disconnected monitor are moved back into view. Use **Open and load** to launch missing applications and restore the selected layout.
 - **Screensavers:** choose folders separately for each connected screen, include subfolders, shuffle, fit/fill and photo timing. Supports JPG/JPEG, PNG, WebP, BMP, GIF and silent MP4/M4V/WebM playback using installed Windows codecs. Unassigned screens stay black. Videos run to completion. Right arrow or Space advances all screens; mouse movement or Escape exits.
 - **Hotkeys:** shortcuts for specific profiles, next monitor profile, next window layout, next screensaver image/video, start screensaver, start folder screensaver, sleep displays, and opening the dashboard. Conflicting shortcuts produce an error without intentionally discarding existing bindings. F12 is reserved by Windows.
 
-The tray's right-click menu opens Monitor Configuration, Window Positions, Screensavers, Hotkeys and Taskbars, plus Quit. Closing the dashboard destroys its webview; the native tray and registered hotkeys remain. Reopen using the tray or the program shortcut. Automatic startup is opt-in.
+The tray’s Monitor Configuration submenu lists saved monitor profiles. Window Positions lists window profiles for dock selection. The tray and native dock have an **Open and load window profile: [selected name]** action. The dock chevron opens profile choices; the remaining menu includes Screensavers, Hotkeys, Taskbars and Quit. Closing the dashboard destroys its webview; the native tray and registered hotkeys remain. Reopen using the tray or the program shortcut. Automatic startup is opt-in.
+
+## Save, load and launch workspaces
+
+The Displays page shows the profile matching the currently detected monitor layout (or Custom / unsaved), a saved-profile selector, **Load profile**, and **Save monitor profile**. Load previews settings; **Test display changes** applies them with rollback. Saving over an existing profile requires an explicit overwrite confirmation. Saving monitor settings preserves that profile’s window slots and launch commands.
+
+In Window Positions, capture open windows or add an executable. Set each app’s quantity and edit each window’s X/Y, width/height, and normal/maximized/minimized state. The scaled layout preview shows the saved rectangles. Quantities correspond to window slots; duplicated slots initially share geometry, which you can edit. Load a profile in the editor to revise it, then save (with confirmation for overwrites).
+
+**Use in dock** selects the master button’s profile. **Open and load** reuses matching open windows, launches missing slots, waits up to 15 seconds per new window, and restores positions. The entire launch phase is capped at 120 seconds; repeated clicks while a launch is active are rejected. A final placement check reports apps that enforce minimum sizes, refuse movement, or do not create another window. It never closes extra application windows. Same-title windows use stable handle ordering when no unique title match exists; this does not restore document contents or browser tabs. **Restore open windows only** retains conservative matching and skips ambiguous windows.
+
+Per-app arguments are JSON arrays, passed directly to the executable without shell parsing. Single-instance apps often need a new-window argument; launching an executable cannot force an app to support multiple windows. Under Advanced startup script / command, supply an interpreter executable, its argument array (including a local script path), and optional working directory. This optional command runs once and must finish successfully before app slots launch. Only scripts you intentionally configure should be used; imported commands never run merely from importing or saving settings. Saved executable paths, arguments and scripts are private configuration, excluded from Git.
+
+Window loading does not change display modes. Apply the monitor profile separately when needed. Placement uses Windows window-placement coordinates and app constraints; elevated apps may require matching privileges.
 
 ## Per-monitor taskbars
 
 Enable bars under **Taskbars**, independently choose left/right/top/bottom and auto-hide, then **Save & apply taskbars**. Pin running applications or browse to an `.exe`; pins are stored separately for each screen. Running windows are filtered to their own monitor and grouped by executable. Hover a group to choose a window by title; click a single-window group to activate or minimize it. Hover menus are title lists, not live thumbnail previews. Full-screen foreground applications suppress bars on the covered monitor.
 
-These are custom DisplayProLite bars; Windows? native taskbars remain managed by Windows. The dashboard links to Windows taskbar settings so you can disable native secondary bars or change native auto-hide. Only one auto-hide appbar can own a particular monitor edge; conflicts are reported. Bars start disabled until you configure them. Executable pins are supported; packaged-app identity/shortcut launchers are not yet implemented.
+These are custom DisplayProLite bars; Windows native taskbars remain managed by Windows. The dashboard links to Windows taskbar settings so you can disable native secondary bars or change native auto-hide. Only one auto-hide appbar can own a particular monitor edge; conflicts are reported. Bars start disabled until you configure them. Executable pins are supported; packaged-app identity/shortcut launchers are not yet implemented.
 
 ## First use
 
@@ -80,6 +92,8 @@ npm run test:dashboard
 python scripts/audit-public-files.py
 ```
 
+The release executable also accepts `--self-test-workspace <output.json>` to launch two temporary test windows, verify exact placement, and check that repeating Open and load does not create duplicates.
+
 The release executable accepts `--diagnose <output.json>` for a read-only inventory and `--self-test <output.json>` for native checks. Self-test creates, moves and restores only its own temporary window, tests current display modes with `CDS_TEST` (does not apply them), verifies hotkey conflicts and checks JSON persistence.
 
 ## Practical boundaries
@@ -96,8 +110,8 @@ Copy `.env.example` to `.env.local` if you need private overrides. Never commit 
 
 `AGENTS.md` defines the public-repository rules. `.gitignore` excludes instance settings, environment files, signing material, diagnostics, test screenshots, dependencies and builds. Run the public-file audit and manually inspect staged changes before pushing; pattern scanning alone cannot prove the absence of secrets.
 
-## Validation status for 0.1.0
+## Validation status for 0.2.0
 
-Native smoke checks cover mode validation without applying changes, exact restore of a dedicated temporary window, hotkey registration/conflicts, and profile persistence. Rust tests cover layout validation, window matching, taskbar monitor filtering/pinning, media filtering, local environment parsing and settings bundle validation. The headless Edge dashboard test uses synthetic Windows responses and does not exercise actual native controls.
+Native smoke checks cover mode validation without applying changes, exact restore of a dedicated temporary window, hotkey registration/conflicts, and profile persistence. The workspace test launches two synthetic app windows, verifies both exact placements, then reloads the profile and checks that no duplicate windows launch. Rust tests cover layout validation, window matching, taskbar monitor filtering/pinning, media filtering, local environment parsing and settings bundle validation. The headless Edge dashboard test uses synthetic Windows responses and does not exercise actual native controls.
 
-Native taskbar hover/auto-hide, media playback across actual screens, and end-to-end display rollback still require interactive acceptance testing. This initial preview should not be described as fully production-validated. Local verification output is intentionally excluded from this public repository.
+Interactive native dock menu/hover/auto-hide checks, media playback across actual screens, and end-to-end display rollback still require interactive acceptance testing. This preview should not be described as fully production-validated. Local verification output is intentionally excluded from this public repository.

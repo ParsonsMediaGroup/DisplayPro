@@ -164,3 +164,78 @@ pub fn run(path: &Path) -> Result<(), String> {
         }
     }
 }
+
+/// Opens only this executable's temporary test windows, never user applications.
+pub fn workspace_run(path: &Path) -> Result<(), String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .into_owned();
+    let title = format!(
+        "DisplayProLite workspace verification {}",
+        std::process::id()
+    );
+    let slot = crate::layouts::SavedWindow {
+        handle: 0,
+        pid: 0,
+        exe: exe.clone(),
+        class: "Static".into(),
+        title: title.clone(),
+        rect: [80, 80, 600, 400],
+        maximized: false,
+        minimized: false,
+    };
+    // Windows reports the built-in class name as Static.
+    let mut second = slot.clone();
+    second.rect = [700, 80, 1220, 400];
+    let profile = crate::Profile {
+        id: "test-workspace".into(),
+        name: "Synthetic test".into(),
+        monitors: vec![],
+        windows: vec![slot, second],
+        launches: vec![crate::workspace::LaunchCommand {
+            exe: exe.clone(),
+            args: vec!["--test-window".into(), title.clone()],
+            working_dir: String::new(),
+        }],
+        startup: None,
+    };
+    let result = (|| {
+        let first = crate::workspace::open(&profile)?;
+        if first.launched != 2 || first.restored != 2 || !first.skipped.is_empty() {
+            return Err(format!(
+                "Initial workspace result: launched {}, restored {}, skipped {:?}",
+                first.launched, first.restored, first.skipped
+            ));
+        }
+        let again = crate::workspace::open(&profile)?;
+        if again.launched != 0 || again.restored != 2 || !again.skipped.is_empty() {
+            return Err("Reopening the workspace did not reuse its two windows.".into());
+        }
+        Ok(
+            serde_json::json!({"success":true,"checks":["launch two missing app windows with arguments","assign duplicate-title windows to separate slots","restore and verify exact positions and sizes","repeat open/load reuses windows without launching duplicates"],"launched":first.launched,"restored":first.restored}),
+        )
+    })();
+    if let Ok(windows) = crate::layouts::capture() {
+        for window in windows
+            .into_iter()
+            .filter(|w| w.exe.eq_ignore_ascii_case(&exe) && w.title == title)
+        {
+            unsafe {
+                let _ = PostMessageW(
+                    Some(HWND(window.handle as *mut _)),
+                    WM_CLOSE,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        }
+    }
+    match result {
+        Ok(report) => crate::write_json(path, &report),
+        Err(e) => {
+            let _ = crate::write_json(path, &serde_json::json!({"success":false,"error":e}));
+            Err(e)
+        }
+    }
+}

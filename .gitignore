@@ -23,6 +23,9 @@ user-data/
 /photos.json
 /taskbars.json
 /pending.json
+/last-action.json
+/dock-request.json
+/instance.lock
 verification/
 
 # Credentials, signing material, crash dumps, and local executables.

@@ -61,6 +61,7 @@ struct Bar {
     icons: HashMap<String, HICON>,
     hover: Option<usize>,
     positioning: bool,
+    dock_config: crate::Config,
 }
 static THREAD: AtomicU32 = AtomicU32::new(0);
 static DIRTY: AtomicBool = AtomicBool::new(false);
@@ -403,12 +404,61 @@ unsafe fn draw(b: &Bar) {
     let font = GetStockObject(DEFAULT_GUI_FONT);
     let previous = SelectObject(dc, font);
     let size = b.config.size as i32;
+    let controls = if vertical(&b.config) {
+        size * 4
+    } else {
+        size + 320
+    };
+    let mut chevron = RECT {
+        left: 0,
+        top: 0,
+        right: size,
+        bottom: size,
+    };
+    let mut glyph = ">".encode_utf16().collect::<Vec<_>>();
+    DrawTextW(
+        dc,
+        &mut glyph,
+        &mut chevron,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+    );
+    let mut button = if vertical(&b.config) {
+        RECT {
+            left: 2,
+            top: size,
+            right: size - 2,
+            bottom: controls,
+        }
+    } else {
+        RECT {
+            left: size,
+            top: 2,
+            right: controls,
+            bottom: size - 2,
+        }
+    };
+    let mut title = format!(
+        "Open and load window profile: {}",
+        crate::dock::selected_name(&b.dock_config)
+    )
+    .encode_utf16()
+    .collect::<Vec<_>>();
+    DrawTextW(
+        dc,
+        &mut title,
+        &mut button,
+        if vertical(&b.config) {
+            DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS
+        } else {
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS
+        },
+    );
     let foreground = GetForegroundWindow().0 as usize;
     for (i, g) in b.groups.iter().enumerate() {
         let (x, y) = if vertical(&b.config) {
-            (0, i as i32 * size)
+            (0, controls + i as i32 * size)
         } else {
-            (i as i32 * size, 0)
+            (controls + i as i32 * size, 0)
         };
         if x >= client.right || y >= client.bottom {
             break;
@@ -503,6 +553,96 @@ unsafe fn draw(b: &Bar) {
     SelectObject(dc, previous);
     let _ = EndPaint(b.hwnd, &paint);
 }
+unsafe fn master_menu(b: &Bar) -> Option<String> {
+    let menu = CreatePopupMenu().ok()?;
+    let label = wide(
+        &format!(
+            "Open and load window profile: {}",
+            crate::dock::selected_name(&b.dock_config)
+        )
+        .replace('&', "&&"),
+    );
+    let _ = AppendMenuW(menu, MF_STRING, 1, PCWSTR(label.as_ptr()));
+    let mut point = POINT::default();
+    let _ = GetCursorPos(&mut point);
+    let n = TrackPopupMenu(
+        menu,
+        TPM_RETURNCMD | TPM_NONOTIFY,
+        point.x,
+        point.y,
+        None,
+        b.hwnd,
+        None,
+    )
+    .0;
+    let _ = DestroyMenu(menu);
+    if n == 1 {
+        Some(
+            b.dock_config
+                .selected_window_profile
+                .as_ref()
+                .map(|id| format!("open-load:{id}"))
+                .unwrap_or_else(|| "page:profiles".into()),
+        )
+    } else {
+        None
+    }
+}
+unsafe fn profile_menu(b: &Bar) -> Option<String> {
+    let menu = CreatePopupMenu().ok()?;
+    let mut actions = vec![];
+    let mut add = |label: String, action: String| {
+        actions.push(action);
+        let label = wide(&label.replace('&', "&&"));
+        let _ = AppendMenuW(menu, MF_STRING, actions.len(), PCWSTR(label.as_ptr()));
+    };
+    add("Monitor Configuration…".into(), "page:displays".into());
+    for p in b
+        .dock_config
+        .profiles
+        .iter()
+        .filter(|p| !p.monitors.is_empty())
+    {
+        add(
+            format!("Monitor profile: {}", p.name),
+            format!("display:{}", p.id),
+        );
+    }
+    add("Window profile editor…".into(), "page:profiles".into());
+    for p in b
+        .dock_config
+        .profiles
+        .iter()
+        .filter(|p| !p.windows.is_empty())
+    {
+        add(
+            format!(
+                "{}Window profile: {}",
+                if b.dock_config.selected_window_profile.as_ref() == Some(&p.id) {
+                    "✓ "
+                } else {
+                    ""
+                },
+                p.name
+            ),
+            format!("select-window:{}", p.id),
+        );
+    }
+    let mut point = POINT::default();
+    let _ = GetCursorPos(&mut point);
+    let n = TrackPopupMenu(
+        menu,
+        TPM_RETURNCMD | TPM_NONOTIFY,
+        point.x,
+        point.y,
+        None,
+        b.hwnd,
+        None,
+    )
+    .0 as usize;
+    let _ = DestroyMenu(menu);
+    n.checked_sub(1).and_then(|i| actions.get(i).cloned())
+}
 unsafe fn selected_window(w: &SavedWindow) {
     let hwnd = HWND(w.handle as *mut _);
     if IsWindow(Some(hwnd)).as_bool() {
@@ -583,6 +723,10 @@ unsafe fn send(msg: u32, hwnd: HWND, value: isize) {
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<Bar>;
     match msg {
+        crate::dock::REFRESH_DOCK => {
+            send(crate::dock::REFRESH_DOCK, hwnd, 0);
+            return LRESULT(0);
+        }
         WM_PAINT => {
             if !ptr.is_null() {
                 if let Ok(b) = (*ptr).try_borrow() {
@@ -750,6 +894,7 @@ pub fn run(parent: u32) -> Result<(), String> {
                     icons: HashMap::new(),
                     hover: None,
                     positioning: false,
+                    dock_config: crate::dock::disk_config(),
                 }));
                 SetWindowLongPtrW(
                     hwnd,
@@ -822,6 +967,14 @@ pub fn run(parent: u32) -> Result<(), String> {
         )?;
         while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
             match msg.message {
+                crate::dock::REFRESH_DOCK => {
+                    let c = crate::dock::disk_config();
+                    for cell in &bars {
+                        let mut b = cell.borrow_mut();
+                        b.dock_config = c.clone();
+                        let _ = InvalidateRect(Some(b.hwnd), None, false);
+                    }
+                }
                 REFRESH => {
                     if msg.lParam.0 == 0 {
                         SetTimer(Some(bars[0].borrow().hwnd), 1, 250, None);
@@ -867,8 +1020,51 @@ pub fn run(parent: u32) -> Result<(), String> {
                         let mut b = cell.borrow_mut();
                         let x = (msg.lParam.0 as u16) as i16 as i32;
                         let y = ((msg.lParam.0 >> 16) as u16) as i16 as i32;
-                        let index = if vertical(&b.config) { y } else { x }.max(0) as usize
-                            / b.config.size as usize;
+                        let coordinate = if vertical(&b.config) { y } else { x };
+                        let controls = if vertical(&b.config) {
+                            b.config.size as i32 * 4
+                        } else {
+                            b.config.size as i32 + 320
+                        };
+                        let index = if coordinate >= controls {
+                            (coordinate - controls) as usize / b.config.size as usize
+                        } else if coordinate < b.config.size as i32 {
+                            usize::MAX
+                        } else {
+                            usize::MAX - 1
+                        };
+                        if msg.message == HOVER
+                            && coordinate >= b.config.size as i32
+                            && coordinate < controls
+                        {
+                            if let Some(action) = master_menu(&b) {
+                                let _ = crate::dock::request(&action);
+                            }
+                            continue;
+                        }
+                        if msg.message == ACTION && coordinate < controls {
+                            let action = if coordinate < b.config.size as i32 {
+                                profile_menu(&b)
+                            } else {
+                                b.dock_config
+                                    .selected_window_profile
+                                    .as_ref()
+                                    .map(|id| format!("open-load:{id}"))
+                                    .or(Some("page:profiles".into()))
+                            };
+                            if let Some(action) = action {
+                                if let Err(e) = crate::dock::request(&action) {
+                                    let text = wide(&e);
+                                    MessageBoxW(
+                                        Some(b.hwnd),
+                                        PCWSTR(text.as_ptr()),
+                                        w!("DisplayProLite"),
+                                        MB_OK | MB_ICONINFORMATION,
+                                    );
+                                }
+                            }
+                            continue;
+                        }
                         match msg.message {
                             ACTION => choose(&b, index, false),
                             HOVER => choose(&b, index, true),

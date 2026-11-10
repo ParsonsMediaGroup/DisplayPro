@@ -179,6 +179,12 @@ try {
           case "finish_display":
             state.pending = null;
             return;
+          case "select_window_profile":
+            state.config.selected_window_profile = args.id;
+            return;
+          case "open_window_profile":
+            state.config.selected_window_profile = args.id;
+            return { launched: 2, restored: 3, skipped: [] };
           case "restore_windows":
             return { restored: 2, skipped: [] };
           default:
@@ -218,6 +224,104 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
     path: path.join(output, "dashboard-profiles.png"),
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Load in editor", exact: true })
+    .click();
+  await page.locator("[data-quantity]").first().fill("3");
+  await page.locator("[data-quantity]").first().dispatchEvent("change");
+  await page.locator('[data-slot="2"][data-geometry="0"]').fill("1200");
+  await page
+    .locator('[data-slot="2"][data-geometry="0"]')
+    .dispatchEvent("change");
+  await page
+    .locator('[data-command-field="args"]')
+    .first()
+    .fill('["--new-window"]');
+  await page
+    .locator('[data-command-field="args"]')
+    .first()
+    .dispatchEvent("change");
+  await page
+    .getByRole("button", { name: "Save profile changes", exact: true })
+    .click();
+  await page
+    .getByRole("heading", { name: "Overwrite saved profile?" })
+    .waitFor();
+  assert.equal(
+    await page.evaluate(() => window.__state.config.profiles[0].windows.length),
+    1,
+  );
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Save profile changes", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Overwrite profile", exact: true })
+    .click();
+  await page.waitForFunction(
+    () => window.__state.config.profiles[0].windows.length === 3,
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__state.config.profiles[0].windows[2].rect[0],
+    ),
+    1200,
+  );
+  assert.deepEqual(
+    await page.evaluate(
+      () => window.__state.config.profiles[0].launches[0].args,
+    ),
+    ["--new-window"],
+  );
+  await page.getByRole("button", { name: "Use in dock", exact: true }).click();
+  await page.waitForFunction(
+    () => window.__state.config.selected_window_profile === "profile1",
+  );
+  await page
+    .getByRole("button", { name: "Open and load", exact: true })
+    .click();
+  await page.waitForFunction(() =>
+    window.__calls.some((c) => c.command === "open_window_profile"),
+  );
+  await page.locator('[data-page="displays"]').click();
+  assert.ok(
+    (await page.locator(".badge").first().innerText()).includes(
+      "Verification workspace",
+    ),
+  );
+  await page.locator("#display-profile").selectOption("profile1");
+  await page.getByRole("button", { name: "Load profile", exact: true }).click();
+  const applies = await page.evaluate(
+    () => window.__calls.filter((c) => c.command === "apply_displays").length,
+  );
+  await page
+    .getByRole("button", { name: "Save monitor profile", exact: true })
+    .click();
+  await page
+    .getByRole("heading", { name: "Overwrite saved profile?" })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Overwrite profile", exact: true })
+    .click();
+  assert.equal(
+    await page.evaluate(() => window.__state.config.profiles[0].windows.length),
+    3,
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__calls.filter((c) => c.command === "apply_displays").length,
+    ),
+    applies,
+  );
+  await page.screenshot({
+    path: path.join(output, "dashboard-monitor-profiles.png"),
+    fullPage: true,
+  });
+  await page.locator('[data-page="profiles"]').click();
+  await page.screenshot({
+    path: path.join(output, "dashboard-workspace-editor.png"),
     fullPage: true,
   });
   await page.locator('[data-page="hotkeys"]').click();
@@ -291,6 +395,8 @@ try {
           "dashboard loads",
           "display confirmation modal",
           "profile capture and selected window persistence",
+          "window quantity, geometry, launch arguments, dock selection and open/load",
+          "detected display profile, load preview and overwrite guard (cancel and confirm)",
           "common hotkey actions",
           "per-monitor photo folders and fit settings",
           "taskbar edge, enable and per-monitor pin settings",

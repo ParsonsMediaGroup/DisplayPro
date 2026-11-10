@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod display;
+mod dock;
 mod environment;
 mod hotkeys;
 mod layouts;
@@ -8,6 +9,7 @@ mod screensaver;
 mod settings;
 mod smoke;
 mod taskbars;
+mod workspace;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -29,6 +31,10 @@ struct Profile {
     name: String,
     monitors: Vec<display::Monitor>,
     windows: Vec<layouts::SavedWindow>,
+    #[serde(default)]
+    launches: Vec<workspace::LaunchCommand>,
+    #[serde(default)]
+    startup: Option<workspace::LaunchCommand>,
 }
 #[derive(Clone, Serialize, Deserialize, Default)]
 struct Config {
@@ -36,6 +42,8 @@ struct Config {
     profiles: Vec<Profile>,
     #[serde(default)]
     hotkeys: Vec<hotkeys::Binding>,
+    #[serde(default)]
+    selected_window_profile: Option<String>,
 }
 struct State {
     config: Mutex<Config>,
@@ -71,7 +79,9 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     fs::rename(temp, path).map_err(|e| e.to_string())
 }
 fn save_config(state: &State, new: &Config) -> Result<(), String> {
-    write_json(&state.dir.join("profiles.json"), new)
+    write_json(&state.dir.join("profiles.json"), new)?;
+    dock::refresh_bars();
+    Ok(())
 }
 fn show(app: &tauri::AppHandle) {
     let handle = app.clone();
@@ -108,6 +118,11 @@ fn disk_lock(dir: &Path) -> Result<fs::File, String> {
     Err("Another display operation is still finishing. Try again shortly.".into())
 }
 fn notify(app: &tauri::AppHandle, result: Result<String, String>) {
+    let persisted = match &result {
+        Ok(s) => serde_json::json!({"ok":true,"message":s}),
+        Err(e) => serde_json::json!({"ok":false,"message":e}),
+    };
+    let _ = write_json(&data_dir().join("last-action.json"), &persisted);
     let _ = app.emit(
         "action-result",
         match result {
@@ -125,8 +140,11 @@ fn get_state(state: tauri::State<State>) -> Result<serde_json::Value, String> {
     let pending = fs::read(state.dir.join("pending.json"))
         .ok()
         .and_then(|v| serde_json::from_slice::<Pending>(&v).ok());
+    let last_action = fs::read(state.dir.join("last-action.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
     Ok(
-        serde_json::json!({"config":config,"monitors":display::enumerate(true)?,"screensaver":screensaver::get()?,"photos":photos::load()?,"taskbars":taskbars::load()?,"requestedPage":state.requested_page.lock().unwrap().take(),"pending":pending,"dataDir":state.dir,"startupError":state.startup_error.lock().unwrap().clone(),"autostart":!screensaver::reg_read("Software\\Microsoft\\Windows\\CurrentVersion\\Run","DisplayProLite").is_empty()}),
+        serde_json::json!({"lastAction":last_action,"config":config,"monitors":display::enumerate(true)?,"screensaver":screensaver::get()?,"photos":photos::load()?,"taskbars":taskbars::load()?,"requestedPage":state.requested_page.lock().unwrap().take(),"pending":pending,"dataDir":state.dir,"startupError":state.startup_error.lock().unwrap().clone(),"autostart":!screensaver::reg_read("Software\\Microsoft\\Windows\\CurrentVersion\\Run","DisplayProLite").is_empty()}),
     )
 }
 #[tauri::command]
@@ -135,12 +153,18 @@ fn capture_windows() -> Result<Vec<layouts::SavedWindow>, String> {
 }
 #[tauri::command]
 fn save_profile(
+    app: tauri::AppHandle,
     state: tauri::State<State>,
     id: Option<String>,
     name: String,
     mut monitors: Vec<display::Monitor>,
     windows: Vec<layouts::SavedWindow>,
+    launches: Option<Vec<workspace::LaunchCommand>>,
+    startup: Option<workspace::LaunchCommand>,
+    overwrite: Option<bool>,
 ) -> Result<(), String> {
+    let launches = launches.unwrap_or_default();
+    workspace::validate(&windows, &launches, &startup)?;
     let name = name.trim();
     if name.is_empty() || name.len() > 100 {
         return Err("Use a profile name between 1 and 100 characters.".into());
@@ -157,6 +181,16 @@ fn save_profile(
     }
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     let mut new = config.clone();
+    if new.profiles.iter().any(|p| Some(&p.id) == id.as_ref()) && overwrite != Some(true) {
+        return Err("Confirm overwrite before replacing an existing profile.".into());
+    }
+    if new
+        .profiles
+        .iter()
+        .any(|p| p.name.eq_ignore_ascii_case(name) && Some(&p.id) != id.as_ref())
+    {
+        return Err("A profile with that name already exists. Load it and confirm overwrite, or choose a new name.".into());
+    }
     let id = id.unwrap_or_else(|| {
         format!(
             "{}",
@@ -171,21 +205,40 @@ fn save_profile(
         name: name.to_string(),
         monitors,
         windows,
+        launches,
+        startup,
     };
     if let Some(slot) = new.profiles.iter_mut().find(|p| p.id == id) {
         *slot = p;
     } else {
         new.profiles.push(p);
     }
+    if new.selected_window_profile.is_none()
+        && new
+            .profiles
+            .iter()
+            .any(|p| p.id == id && !p.windows.is_empty())
+    {
+        new.selected_window_profile = Some(id.clone());
+    }
     save_config(&state, &new)?;
     *config = new;
+    drop(config);
+    dock::refresh_tray(&app)?;
     Ok(())
 }
 #[tauri::command]
-fn delete_profile(state: tauri::State<State>, id: String) -> Result<(), String> {
+fn delete_profile(
+    app: tauri::AppHandle,
+    state: tauri::State<State>,
+    id: String,
+) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     let mut new = config.clone();
     new.profiles.retain(|p| p.id != id);
+    if new.selected_window_profile.as_deref() == Some(&id) {
+        new.selected_window_profile = None;
+    }
     new.hotkeys
         .retain(|b| b.action != format!("display:{id}") && b.action != format!("windows:{id}"));
     state.hotkeys.update(new.hotkeys.clone())?;
@@ -194,6 +247,8 @@ fn delete_profile(state: tauri::State<State>, id: String) -> Result<(), String> 
         return Err(e);
     }
     *config = new;
+    drop(config);
+    dock::refresh_tray(&app)?;
     Ok(())
 }
 fn begin_display(
@@ -438,6 +493,28 @@ fn cycle_windows(state: &State) -> Result<String, String> {
 }
 pub fn dispatch(app: &tauri::AppHandle, action: &str) {
     let state = app.state::<State>();
+    if let Some(id) = action.strip_prefix("open-load:") {
+        let result = get_profile(&state, id)
+            .and_then(|p| workspace::open(&p))
+            .map(|r| {
+                format!(
+                    "Opened {} apps; restored {} windows. {}",
+                    r.launched,
+                    r.restored,
+                    r.skipped.join("; ")
+                )
+            });
+        show(app);
+        notify(app, result);
+        return;
+    }
+    if let Some(id) = action.strip_prefix("select-window:") {
+        notify(
+            app,
+            dock::select(&app, id.to_string()).map(|_| "Window profile selected.".into()),
+        );
+        return;
+    }
     if let Some(page) = action.strip_prefix("page:") {
         *state.requested_page.lock().unwrap() = Some(page.into());
         show(app);
@@ -527,6 +604,14 @@ fn main() {
     if args.get(1).is_some_and(|s| s == "--test-window") {
         if let Some(title) = args.get(2) {
             let _ = smoke::test_window(title);
+        }
+        return;
+    }
+    if args.get(1).is_some_and(|s| s == "--self-test-workspace") {
+        if let Some(path) = args.get(2) {
+            if smoke::workspace_run(Path::new(path)).is_err() {
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -672,7 +757,7 @@ fn main() {
                 app,
                 &[&open, &positions, &saver, &keys, &bars, &separator, &quit],
             )?;
-            let mut tray = TrayIconBuilder::new()
+            let mut tray = TrayIconBuilder::with_id("main")
                 .tooltip("DisplayProLite")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -701,12 +786,16 @@ fn main() {
                 tray = tray.icon(icon);
             }
             tray.build(app)?;
+            dock::refresh_tray(app.handle())?;
+            dock::listen(app.handle().clone())?;
             if !args.iter().any(|s| s == "--tray") {
                 show(app.handle());
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            dock::select_window_profile,
+            dock::open_window_profile,
             get_state,
             capture_windows,
             save_profile,

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 — 2026-11-09
+
+- Monitor-profile load/save controls, detected-profile indicator and explicit overwrite guard.
+- Native dock chevron and tray submenus for selecting saved monitor and window profiles.
+- Persistent selected window profile and a named Open and load master action.
+- Workspace editor with app quantities, editable per-window geometry/state, layout preview, launch arguments and an optional startup command.
+- Bounded on-demand missing-window launch, window reuse, exact-placement verification and failure reporting.
+- Synthetic dashboard coverage and a native two-window launch/reuse self-test.
+
 ## 0.1.0 — 2026-11-09
 
 Initial preview of DisplayProLite:

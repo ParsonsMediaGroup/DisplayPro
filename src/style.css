@@ -554,3 +554,47 @@ dialog h2 {
 .pin-row button {
   font-size: 12px;
 }
+
+.window-preview {
+  width: 100%;
+  height: 260px;
+  background: #101b25;
+  border: 1px solid #344552;
+  border-radius: 12px;
+  margin: 12px 0;
+}
+.slot-fields {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr) 1.3fr;
+  gap: 10px;
+}
+.window-slot,
+.launch-app {
+  padding: 16px;
+  border-bottom: 1px solid #344552;
+}
+.launch-app > small {
+  display: block;
+  overflow-wrap: anywhere;
+  margin: 6px 0;
+}
+.startup-editor {
+  margin: 20px 0;
+}
+.startup-editor summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.startup-editor label {
+  margin-top: 10px;
+}
+.slot-fields label {
+  min-width: 0;
+}
+.slot-fields input {
+  width: 100%;
+  min-width: 0;
+}
+dialog::backdrop {
+  background: #0009;
+}

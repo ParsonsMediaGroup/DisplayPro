@@ -1,3 +1,8 @@
+import {
+  windowEditor,
+  resizeQuantity,
+  type LaunchCommand,
+} from "./workspace-editor";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./style.css";
@@ -42,6 +47,8 @@ type Profile = {
   name: string;
   monitors: Monitor[];
   windows: SavedWindow[];
+  launches?: LaunchCommand[];
+  startup?: LaunchCommand | null;
 };
 type Binding = { shortcut: string; action: string };
 type Saver = {
@@ -53,10 +60,15 @@ type Saver = {
 };
 type Pending = { id: string; deadline: number };
 type Snapshot = {
+  lastAction?: { ok: boolean; message: string } | null;
   taskbars: TaskbarConfig;
   photos: PhotoConfig;
   requestedPage: string | null;
-  config: { profiles: Profile[]; hotkeys: Binding[] };
+  config: {
+    profiles: Profile[];
+    hotkeys: Binding[];
+    selected_window_profile?: string | null;
+  };
   monitors: Monitor[];
   screensaver: Saver;
   pending: Pending | null;
@@ -72,6 +84,60 @@ let bindings: Binding[] = [];
 let page = "displays";
 let editing: string | null = null;
 let profileName = "";
+let launches: LaunchCommand[] = [];
+let startup: LaunchCommand | null = null;
+let displaySelection = "";
+let displaySaveName = "";
+let pendingSave: Record<string, unknown> | null = null;
+function detectedProfiles() {
+  const signature = (ms: Monitor[]) =>
+    ms
+      .map((m) =>
+        JSON.stringify([
+          m.device,
+          m.enabled,
+          ...(m.enabled
+            ? [m.x, m.y, m.width, m.height, m.hz, m.orientation, m.primary]
+            : []),
+        ]),
+      )
+      .sort()
+      .join("|");
+  return data.config.profiles.filter(
+    (p) =>
+      p.monitors.length && signature(p.monitors) === signature(data.monitors),
+  );
+}
+function displayProfileControls() {
+  const detected = detectedProfiles();
+  return `<section class="card"><div class="section-head"><h2>Monitor profiles</h2><span class="badge">Detected: ${esc(detected.map((p) => p.name).join(", ") || "Custom / unsaved")}</span></div><div class="row"><label class="grow">Saved profile<select id="display-profile"><option value="">New profile</option>${data.config.profiles
+    .filter((p) => p.monitors.length)
+    .map(
+      (p) =>
+        `<option value="${esc(p.id)}" ${p.id === displaySelection ? "selected" : ""}>${esc(p.name)}</option>`,
+    )
+    .join(
+      "",
+    )}</select></label><label class="grow">Save as name<input id="display-save-name" maxlength="100" value="${esc(displaySaveName)}" placeholder="Profile name"></label></div><div class="toolbar"><button data-action="load-display-profile" ${!displaySelection ? "disabled" : ""}>Load profile</button><button data-action="save-display-profile">Save monitor profile</button></div><p class="help">Load previews the saved configuration. Test display changes applies it with a 25-second rollback. Saving an existing name requires overwrite confirmation.</p></section>`;
+}
+async function savePayload(payload: Record<string, unknown>) {
+  await invoke("save_profile", payload);
+  pendingSave = null;
+  await refresh(false);
+  status("Profile saved locally.");
+}
+async function requestSave(payload: Record<string, unknown>) {
+  const existing = data.config.profiles.find(
+    (p) =>
+      p.id === payload.id ||
+      p.name.toLowerCase() === String(payload.name).trim().toLowerCase(),
+  );
+  if (existing) {
+    pendingSave = { ...payload, id: existing.id, overwrite: true };
+    document.querySelector("#overwrite-name")!.textContent = existing.name;
+    document.querySelector<HTMLDialogElement>("#overwrite-dialog")!.showModal();
+  } else await savePayload({ ...payload, overwrite: false });
+}
 let includeDisplays = true;
 let pending: Pending | null = null;
 let countdown: number | undefined;
@@ -115,10 +181,14 @@ async function refresh(reset = true) {
   if (reset) {
     draft = clone(data.monitors);
     bindings = clone(data.config.hotkeys);
+    const detected = detectedProfiles()[0];
+    displaySelection = detected?.id ?? "";
+    displaySaveName = detected?.name ?? "";
   }
   pending = data.pending;
   render();
   if (pending) showPending(pending);
+  if (data.lastAction) status(data.lastAction.message, !data.lastAction.ok);
   if (data.startupError) status(data.startupError, true);
 }
 function monitorDiagram() {
@@ -148,10 +218,16 @@ function modeOptions(m: Monitor) {
     .join("");
 }
 function displays() {
-  return `<div class="heading"><div><p class="eyebrow">YOUR WORKSPACE</p><h1>Displays, in their place.</h1><p>Set resolution, refresh rate and arrangement. Save the setup you like.</p></div><button data-action="refresh">↻ Refresh</button></div><section class="card topology"><div class="section-head"><h2>Monitor arrangement</h2><span class="badge">${draft.filter((m) => m.enabled).length} active displays</span></div>${monitorDiagram()}<div class="toolbar"><span>Position in desktop pixels. Negative values are supported.</span><button data-action="arrange">Arrange side by side</button></div></section><div class="display-grid">${draft.map((m, i) => `<section class="card display-card"><div class="section-head"><div class="display-title"><span class="number">${i + 1}</span><div><h2>${esc(m.label)}</h2><small>${esc(m.device)}</small></div></div><label class="check"><input type="checkbox" data-monitor="${i}" data-field="enabled" ${m.enabled ? "checked" : ""}> Enabled</label></div><label>Resolution & refresh rate<select data-monitor="${i}" data-field="mode" ${!m.enabled ? "disabled" : ""}>${modeOptions(m)}</select></label><div class="row"><label>X position<input type="number" step="1" min="-100000" max="100000" data-monitor="${i}" data-field="x" value="${m.x}"></label><label>Y position<input type="number" step="1" min="-100000" max="100000" data-monitor="${i}" data-field="y" value="${m.y}"></label></div><label class="check"><input type="radio" name="primary" data-monitor="${i}" data-field="primary" ${m.primary ? "checked" : ""} ${!m.enabled ? "disabled" : ""}> Primary display</label></section>`).join("")}</div><div class="action-bar"><p>Changes revert after 25 seconds unless you keep them.</p><button class="accent" data-action="apply">Test display changes</button></div>`;
+  return `<div class="heading"><div><p class="eyebrow">YOUR WORKSPACE</p><h1>Displays, in their place.</h1><p>Set resolution, refresh rate and arrangement. Save the setup you like.</p></div><button data-action="refresh">↻ Refresh</button></div>${displayProfileControls()}<section class="card topology"><div class="section-head"><h2>Monitor arrangement</h2><span class="badge">${draft.filter((m) => m.enabled).length} active displays</span></div>${monitorDiagram()}<div class="toolbar"><span>Position in desktop pixels. Negative values are supported.</span><button data-action="arrange">Arrange side by side</button></div></section><div class="display-grid">${draft.map((m, i) => `<section class="card display-card"><div class="section-head"><div class="display-title"><span class="number">${i + 1}</span><div><h2>${esc(m.label)}</h2><small>${esc(m.device)}</small></div></div><label class="check"><input type="checkbox" data-monitor="${i}" data-field="enabled" ${m.enabled ? "checked" : ""}> Enabled</label></div><label>Resolution & refresh rate<select data-monitor="${i}" data-field="mode" ${!m.enabled ? "disabled" : ""}>${modeOptions(m)}</select></label><div class="row"><label>X position<input type="number" step="1" min="-100000" max="100000" data-monitor="${i}" data-field="x" value="${m.x}"></label><label>Y position<input type="number" step="1" min="-100000" max="100000" data-monitor="${i}" data-field="y" value="${m.y}"></label></div><label class="check"><input type="radio" name="primary" data-monitor="${i}" data-field="primary" ${m.primary ? "checked" : ""} ${!m.enabled ? "disabled" : ""}> Primary display</label></section>`).join("")}</div><div class="action-bar"><p>Changes revert after 25 seconds unless you keep them.</p><button class="accent" data-action="apply">Test display changes</button></div>`;
 }
 function profiles() {
-  return `<div class="heading"><div><p class="eyebrow">READY WHEN YOU ARE</p><h1>Workspace profiles.</h1><p>Save a monitor setup, window positions, or both.</p></div><button data-action="new-profile">+ New profile</button></div><section class="card"><div class="section-head"><h2>${editing ? "Edit profile" : "Create a profile"}</h2><span class="badge">${chosen.size} windows selected</span></div><div class="row"><label class="grow">Profile name<input id="profile-name" maxlength="100" placeholder="Work, gaming, design…" value="${esc(profileName)}"></label><label class="check"><input id="include-displays" type="checkbox" ${includeDisplays ? "checked" : ""}> Include display setup</label></div><p class="help">Display settings come from the Displays tab. Capture windows to save their current positions; only open, identifiable windows can be restored.</p><div class="toolbar"><button data-action="capture">Capture open windows</button>${windows.length ? '<button data-action="select-all">Select all</button><button data-action="select-none">Select none</button>' : ""}</div>${windows.length ? `<div class="window-list">${windows.map((w, i) => `<label class="window-row"><input type="checkbox" data-window="${i}" ${chosen.has(i) ? "checked" : ""}><div><strong>${esc(w.title)}</strong><small>${esc(short(w.exe))} · ${w.rect[2] - w.rect[0]} × ${w.rect[3] - w.rect[1]}${w.maximized ? " · Maximized" : ""}${w.minimized ? " · Minimized" : ""}</small></div></label>`).join("")}</div>` : '<div class="empty">Capture your open windows to include a window layout.</div>'}<div class="toolbar right"><button class="accent" data-action="save-profile">${editing ? "Save profile changes" : "Save new profile"}</button></div></section><h2 class="subheading">Saved profiles <span class="muted">${data.config.profiles.length}</span></h2><div class="profile-grid">${data.config.profiles.map((p) => `<section class="card profile"><div class="section-head"><h2>${esc(p.name)}</h2><button class="text-button" data-action="edit-profile" data-id="${esc(p.id)}">Edit</button></div><p>${p.monitors.length} displays <span>·</span> ${p.windows.length} windows</p><div class="toolbar">${p.monitors.length ? `<button data-action="apply-profile" data-id="${esc(p.id)}">Apply displays</button>` : ""}${p.windows.length ? `<button data-action="restore" data-id="${esc(p.id)}">Restore windows</button>` : ""}<button class="text-button danger" data-action="delete" data-id="${esc(p.id)}">Delete</button></div></section>`).join("") || '<div class="empty">Your saved setups will appear here.</div>'}</div>`;
+  return `<div class="heading"><div><p class="eyebrow">READY WHEN YOU ARE</p><h1>Workspace profiles.</h1><p>Save and load app quantities, launch commands, and window layouts.</p></div><button data-action="new-profile">+ New profile</button></div>
+  <section class="card"><div class="section-head"><h2>${editing ? "Edit profile" : "Create a profile"}</h2><span class="badge">${chosen.size} window slots</span></div>
+  <div class="row"><label class="grow">Profile name<input id="profile-name" maxlength="100" placeholder="Work, gaming, design…" value="${esc(profileName)}"></label><label class="check"><input id="include-displays" type="checkbox" ${includeDisplays ? "checked" : ""}> Include display setup</label></div>
+  <div class="toolbar"><button data-action="capture">Capture open windows</button><button data-action="select-all">Select all</button><button data-action="select-none">Select none</button></div>
+  ${windowEditor(windows, chosen, launches, startup)}
+  <div class="toolbar right"><button class="accent" data-action="save-profile">${editing ? "Save profile changes" : "Save new profile"}</button></div></section>
+  <h2 class="subheading">Saved profiles</h2><div class="profile-grid">${data.config.profiles.map((p) => `<section class="card profile"><div class="section-head"><h2>${esc(p.name)}</h2><button data-action="edit-profile" data-id="${esc(p.id)}">Load in editor</button></div><p>${p.monitors.length} displays · ${p.windows.length} windows${p.id === data.config.selected_window_profile ? " · Selected in dock" : ""}</p><div class="toolbar">${p.monitors.length ? `<button data-action="apply-profile" data-id="${esc(p.id)}">Apply displays</button>` : ""}${p.windows.length ? `<button class="accent" data-action="open-load" data-id="${esc(p.id)}">Open and load</button><button data-action="select-dock-profile" data-id="${esc(p.id)}">Use in dock</button><button data-action="restore" data-id="${esc(p.id)}">Restore open windows only</button>` : ""}<button class="text-button danger" data-action="delete" data-id="${esc(p.id)}">Delete</button></div></section>`).join("")}</div>`;
 }
 function screensaver() {
   const s = data.screensaver;
@@ -197,7 +273,7 @@ function render() {
     )
     .join(
       "",
-    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.1.0</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog>`;
+    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.2.0</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog><dialog id="overwrite-dialog"><h2>Overwrite saved profile?</h2><p>Replace the saved settings for <strong id="overwrite-name"></strong>? This changes the saved profile.</p><div class="toolbar right"><button data-action="cancel-overwrite">Cancel</button><button class="danger" data-action="confirm-overwrite">Overwrite profile</button></div></dialog>`;
 }
 function showPending(p: Pending) {
   pending = p;
@@ -278,6 +354,82 @@ root.addEventListener("click", (event) => {
       return;
     }
     switch (b.dataset.action) {
+      case "cancel-overwrite":
+        pendingSave = null;
+        document.querySelector<HTMLDialogElement>("#overwrite-dialog")!.close();
+        break;
+      case "confirm-overwrite":
+        if (pendingSave) {
+          document
+            .querySelector<HTMLDialogElement>("#overwrite-dialog")!
+            .close();
+          await savePayload(pendingSave);
+        }
+        break;
+      case "load-display-profile": {
+        const p = data.config.profiles.find((p) => p.id === displaySelection);
+        if (!p) break;
+        draft = p.monitors.map((m) => ({
+          ...clone(m),
+          modes: data.monitors.find((c) => c.device === m.device)?.modes ?? [],
+        }));
+        render();
+        status(
+          `Loaded ${p.name} for preview. Click Test display changes to apply.`,
+        );
+        break;
+      }
+      case "save-display-profile": {
+        const existing = data.config.profiles.find(
+          (p) => p.name.toLowerCase() === displaySaveName.trim().toLowerCase(),
+        );
+        await requestSave({
+          id: existing?.id ?? null,
+          name: displaySaveName,
+          monitors: draft,
+          windows: existing?.windows ?? [],
+          launches: existing?.launches ?? [],
+          startup: existing?.startup ?? null,
+        });
+        break;
+      }
+      case "add-app": {
+        const exe = await invoke<string | null>("pick_taskbar_app");
+        if (!exe) break;
+        const m = data.monitors.find((m) => m.primary)!;
+        windows.push({
+          handle: 0,
+          pid: 0,
+          exe,
+          class: "",
+          title: short(exe),
+          rect: [m.x + 40, m.y + 40, m.x + 840, m.y + 640],
+          maximized: false,
+          minimized: false,
+        });
+        chosen.add(windows.length - 1);
+        render();
+        break;
+      }
+      case "select-dock-profile":
+        await invoke("select_window_profile", { id });
+        await refresh(false);
+        status("Dock window profile selected.");
+        break;
+      case "open-load": {
+        status("Opening missing apps and loading the layout…");
+        const r = await invoke<{
+          launched: number;
+          restored: number;
+          skipped: string[];
+        }>("open_window_profile", { id });
+        await refresh(false);
+        status(
+          `Opened ${r.launched} apps; restored ${r.restored} windows. ${r.skipped.join("; ")}`,
+          r.skipped.length > 0,
+        );
+        break;
+      }
       case "export-settings": {
         const path = await invoke<string | null>("export_settings");
         if (path) status("Private settings exported to " + path);
@@ -338,22 +490,39 @@ root.addEventListener("click", (event) => {
         editing = null;
         profileName = "";
         windows = [];
+        launches = [];
+        startup = null;
         chosen.clear();
         includeDisplays = true;
         draft = clone(data.monitors);
         render();
         break;
       case "save-profile":
-        await invoke("save_profile", {
+        for (const input of document.querySelectorAll<HTMLInputElement>(
+          "[data-geometry],[data-quantity]",
+        )) {
+          if (!input.reportValidity())
+            throw new Error(
+              "Correct the window dimensions or quantity before saving.",
+            );
+        }
+        for (const input of document.querySelectorAll<HTMLInputElement>(
+          '[data-command-field="args"],#startup-args',
+        )) {
+          const value = JSON.parse(input.value);
+          if (!Array.isArray(value) || value.some((v) => typeof v !== "string"))
+            throw new Error(
+              "Launch arguments must be a JSON array of strings.",
+            );
+        }
+        await requestSave({
           id: editing,
           name: profileName,
           monitors: includeDisplays ? draft : [],
           windows: windows.filter((_, i) => chosen.has(i)),
+          launches,
+          startup,
         });
-        editing = null;
-        profileName = "";
-        await refresh(false);
-        status("Profile saved locally. Assign a shortcut on the Hotkeys tab.");
         break;
       case "edit-profile": {
         const p = data.config.profiles.find((p) => p.id === id)!;
@@ -370,6 +539,8 @@ root.addEventListener("click", (event) => {
             }))
           : clone(data.monitors);
         windows = clone(p.windows);
+        launches = clone(p.launches ?? []);
+        startup = clone(p.startup ?? null);
         chosen = new Set(windows.map((_, i) => i));
         render();
         status(
@@ -470,11 +641,80 @@ root.addEventListener("click", (event) => {
 root.addEventListener("input", (event) => {
   const e = event.target as HTMLInputElement;
   if (e.id === "profile-name") profileName = e.value;
+  if (e.id === "display-save-name") displaySaveName = e.value;
   if (e.dataset.binding !== undefined && e.dataset.kind === "shortcut")
     bindings[Number(e.dataset.binding)].shortcut = e.value;
 });
 root.addEventListener("change", (event) => {
   const e = event.target as HTMLInputElement;
+  try {
+    if (e.id === "display-profile") {
+      displaySelection = e.value;
+      displaySaveName =
+        data.config.profiles.find((p) => p.id === e.value)?.name ?? "";
+      render();
+      return;
+    }
+    if (e.dataset.quantity !== undefined) {
+      resizeQuantity(windows, chosen, e.dataset.quantity, Number(e.value));
+      render();
+      return;
+    }
+    if (e.dataset.slot !== undefined) {
+      const w = windows[Number(e.dataset.slot)];
+      if (e.dataset.state) {
+        w.maximized = e.value === "maximized";
+        w.minimized = e.value === "minimized";
+      } else {
+        const j = Number(e.dataset.geometry),
+          v = Number(e.value);
+        if (!Number.isInteger(v) || Math.abs(v) > 100000 || (j >= 2 && v < 1))
+          throw new Error("Enter a valid window coordinate or positive size.");
+        if (j < 2) {
+          w.rect[j + 2] += v - w.rect[j];
+          w.rect[j] = v;
+        } else w.rect[j] = w.rect[j - 2] + v;
+      }
+      render();
+      return;
+    }
+    if (e.dataset.command) {
+      let c = launches.find((c) => c.exe === e.dataset.command);
+      if (!c) {
+        c = { exe: e.dataset.command, args: [], working_dir: "" };
+        launches.push(c);
+      }
+      if (e.dataset.commandField === "args") {
+        const args = JSON.parse(e.value);
+        if (!Array.isArray(args) || args.some((a) => typeof a !== "string"))
+          throw new Error("Arguments must be a JSON array of strings.");
+        c.args = args;
+      } else c.working_dir = e.value;
+      return;
+    }
+    if (e.id.startsWith("startup-")) {
+      const exe =
+        document.querySelector<HTMLInputElement>("#startup-exe")!.value;
+      const args = JSON.parse(
+        document.querySelector<HTMLInputElement>("#startup-args")!.value,
+      );
+      if (!Array.isArray(args) || args.some((a) => typeof a !== "string"))
+        throw new Error("Startup arguments must be a JSON array of strings.");
+      startup = exe
+        ? {
+            exe,
+            args,
+            working_dir:
+              document.querySelector<HTMLInputElement>("#startup-dir")!.value,
+          }
+        : null;
+      return;
+    }
+  } catch (error) {
+    status(String(error), true);
+    return;
+  }
+
   if (e.dataset.monitor !== undefined) {
     const m = draft[Number(e.dataset.monitor)];
     switch (e.dataset.field) {
@@ -509,6 +749,7 @@ root.addEventListener("change", (event) => {
     const i = Number(e.dataset.window);
     if (e.checked) chosen.add(i);
     else chosen.delete(i);
+    render();
   }
   if (e.id === "include-displays") includeDisplays = e.checked;
   if (e.dataset.binding !== undefined && e.dataset.kind === "action")
