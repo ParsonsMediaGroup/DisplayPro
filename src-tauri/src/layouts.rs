@@ -4,6 +4,7 @@ use windows::{
     core::{BOOL, PWSTR},
     Win32::{
         Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT},
+        Graphics::Gdi::{GetMonitorInfoW, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONEAREST},
         System::Threading::{
             OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
             PROCESS_QUERY_LIMITED_INFORMATION,
@@ -12,6 +13,22 @@ use windows::{
     },
 };
 struct DpiGuard(windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT);
+fn workspace_offset(rect: &RECT) -> (i32, i32) {
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if unsafe { GetMonitorInfoW(MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST), &mut info) }
+        .as_bool()
+    {
+        (
+            info.rcWork.left - info.rcMonitor.left,
+            info.rcWork.top - info.rcMonitor.top,
+        )
+    } else {
+        (0, 0)
+    }
+}
 impl DpiGuard {
     fn new() -> Self {
         Self(unsafe {
@@ -104,7 +121,21 @@ unsafe extern "system" fn collect(hwnd: HWND, param: LPARAM) -> BOOL {
     if GetWindowPlacement(hwnd, &mut p).is_err() {
         return BOOL(1);
     }
-    let r = p.rcNormalPosition;
+    let mut r = p.rcNormalPosition;
+    // Snapped windows can keep an old restore rectangle even while their
+    // actual normal-state window occupies a different area of the screen.
+    if !IsIconic(hwnd).as_bool() && !IsZoomed(hwnd).as_bool() {
+        let mut actual = RECT::default();
+        if GetWindowRect(hwnd, &mut actual).is_ok() {
+            let (dx, dy) = workspace_offset(&actual);
+            r = RECT {
+                left: actual.left - dx,
+                top: actual.top - dy,
+                right: actual.right - dx,
+                bottom: actual.bottom - dy,
+            };
+        }
+    }
     if r.right <= r.left || r.bottom <= r.top {
         return BOOL(1);
     }
@@ -229,6 +260,22 @@ pub fn restore(saved: &[SavedWindow]) -> Result<RestoreReport, String> {
         };
         let hwnd = HWND(c.handle as *mut _);
         let outcome = unsafe { SetWindowPlacement(hwnd, &p) };
+        let position_result = if outcome.is_ok() && !w.maximized && !w.minimized {
+            let (dx, dy) = workspace_offset(&p.rcNormalPosition);
+            Some(unsafe {
+                SetWindowPos(
+                    hwnd,
+                    None,
+                    l + dx,
+                    t + dy,
+                    r - l,
+                    b - t,
+                    SWP_NOACTIVATE | SWP_NOZORDER | SWP_ASYNCWINDOWPOS,
+                )
+            })
+        } else {
+            None
+        };
         let mut outer = RECT::default();
         let outer_result = unsafe { GetWindowRect(hwnd, &mut outer) };
         let mut measured = WINDOWPLACEMENT {
@@ -242,13 +289,14 @@ pub fn restore(saved: &[SavedWindow]) -> Result<RestoreReport, String> {
                 "requested":crate::diagnostics::window(w), "matched_before":crate::diagnostics::window(c),
                 "applied_rect":[l,t,r,b], "adjusted_for_reachability":w.rect != [l,t,r,b],
                 "api_error":outcome.as_ref().err().map(|e|e.to_string()),
+                "set_window_pos_error":position_result.as_ref().and_then(|r|r.as_ref().err()).map(|e|e.to_string()),
                 "dpi":unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) },
                 "immediate_outer_rect":outer_result.is_ok().then_some([outer.left,outer.top,outer.right,outer.bottom]),
                 "immediate_normal_rect":measured_result.is_ok().then_some([measured.rcNormalPosition.left,measured.rcNormalPosition.top,measured.rcNormalPosition.right,measured.rcNormalPosition.bottom]),
                 "measurement_note":"SetWindowPlacement is asynchronous; workspace_final records settled measurements"
             }),
         );
-        match outcome {
+        match outcome.and(position_result.unwrap_or(Ok(()))) {
             Ok(()) => report.restored += 1,
             Err(e) => report.skipped.push(format!("{} — {}", w.title, e)),
         }

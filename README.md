@@ -1,6 +1,6 @@
 # DisplayProLite
 
-**Version: 0.2.4 — workspace launch preview.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
+**Version: 0.2.5 — workspace launch preview.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
 
 A local Windows desktop utility built with Tauri 2, Rust, TypeScript and native Windows APIs. Source lives in this project folder; no account or server is required.
 
@@ -110,7 +110,7 @@ Copy `.env.example` to `.env.local` if you need private overrides. Never commit 
 
 `AGENTS.md` defines the public-repository rules. `.gitignore` excludes instance settings, environment files, signing material, diagnostics, test screenshots, dependencies and builds. Run the public-file audit and manually inspect staged changes before pushing; pattern scanning alone cannot prove the absence of secrets.
 
-## Validation status for 0.2.4
+## Validation status for 0.2.5
 
 Disabled displays reported by Windows appear as clickable tiles in Monitor arrangement. Click a tile to enable it in the preview, then Test display changes and Keep changes. If its saved position overlaps an active screen, it is placed to the right for editing. Profile application automatically enables saved active screens and disables other connected screens, including screens omitted from older profiles. Missing required screens block application; disconnected inactive screens do not. All changes retain the 25-second rollback. Physical activation of disabled outputs still requires interactive acceptance testing on the target hardware.
 
@@ -127,3 +127,5 @@ Window launch results (expected/found/positioned counts and individual failures)
 Window troubleshooting logs are written locally to `%APPDATA%\DisplayProLite\window-placement.log` (or the instance data directory). They record requested and measured window rectangles, width/height, DPI, matched window identity, placement API errors, reachability adjustments, and final workspace results. Logging runs only during actions and rotates at approximately 2 MiB, keeping one previous log. Logs contain private window titles and executable paths; they exclude launch arguments and environment values and must not be published. Reproduce a sizing problem with Open and load, then inspect the latest `workspace_final` and `placement_attempt` entries. A successful asynchronous API call alone does not prove final placement succeeded.
 
 In Hotkeys & settings, choose Add shortcut, press a key combination, and select Monitor configuration: [profile name], Open and load windows: [profile name], or Restore open windows: [profile name]. Save shortcuts to register them. Monitor shortcuts apply enabled/disabled screens with timed confirmation. Open and load launches missing windows and restores the saved layout; Restore open windows only moves existing matching windows. Bindings use stable profile IDs so renaming a profile preserves its shortcuts. Deleting a profile removes its shortcuts.
+
+Normal windows now capture and verify their actual on-screen bounds, converted to the existing workspace coordinate format. This handles snapped windows whose restore rectangles differ from their actual dimensions. Restoration also requests explicit size/position through SetWindowPos. Minimized and maximized windows retain their restore bounds and saved state. Older profiles retain their original saved dimensions; recapture a layout if those dimensions were already incorrect. Coordinate conversion follows the [Windows WINDOWPLACEMENT documentation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-windowplacement).

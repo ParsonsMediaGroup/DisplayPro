@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5 - 2026-11-10
+
+- Capture and verify actual normal-window bounds instead of stale restore rectangles.
+- Explicitly resize normal windows after restoring their state, with taskbar workspace/screen coordinate conversion.
+- Log errors from the explicit resize request.
+
 ## 0.2.4 - 2026-11-10
 
 - Add bounded private window-placement logs with requested/actual geometry, DPI, native API errors, and final workspace measurements.
