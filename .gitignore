@@ -23,6 +23,7 @@ user-data/
 /photos.json
 /taskbars.json
 /pending.json
+/last-workspace-report.json
 /last-action.json
 /dock-request.json
 /instance.lock

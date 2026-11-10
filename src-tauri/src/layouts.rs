@@ -11,6 +11,25 @@ use windows::{
         UI::WindowsAndMessaging::*,
     },
 };
+struct DpiGuard(windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT);
+impl DpiGuard {
+    fn new() -> Self {
+        Self(unsafe {
+            windows::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(
+                windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+            )
+        })
+    }
+}
+impl Drop for DpiGuard {
+    fn drop(&mut self) {
+        if !self.0 .0.is_null() {
+            unsafe {
+                windows::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(self.0);
+            }
+        }
+    }
+}
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SavedWindow {
     pub handle: usize,
@@ -21,6 +40,10 @@ pub struct SavedWindow {
     pub rect: [i32; 4],
     pub maximized: bool,
     pub minimized: bool,
+    #[serde(default)]
+    pub launch: Option<crate::workspace::LaunchCommand>,
+    #[serde(default)]
+    pub restore_only: bool,
 }
 unsafe extern "system" fn collect(hwnd: HWND, param: LPARAM) -> BOOL {
     if !IsWindowVisible(hwnd).as_bool() || GetWindowTextLengthW(hwnd) == 0 {
@@ -94,10 +117,13 @@ unsafe extern "system" fn collect(hwnd: HWND, param: LPARAM) -> BOOL {
         rect: [r.left, r.top, r.right, r.bottom],
         maximized: p.showCmd == SW_SHOWMAXIMIZED.0 as u32,
         minimized: IsIconic(hwnd).as_bool(),
+        launch: None,
+        restore_only: false,
     });
     BOOL(1)
 }
 pub fn capture() -> Result<Vec<SavedWindow>, String> {
+    let _dpi = DpiGuard::new();
     let mut windows = vec![];
     unsafe {
         EnumWindows(Some(collect), LPARAM(&mut windows as *mut _ as isize))
@@ -127,7 +153,7 @@ pub fn match_window(
         .collect();
     if let Some((i, _)) = candidates
         .iter()
-        .find(|(_, w)| w.handle == saved.handle && w.pid == saved.pid && w.title == saved.title)
+        .find(|(_, w)| w.handle == saved.handle && w.pid == saved.pid)
     {
         return Some(*i);
     }
@@ -144,6 +170,7 @@ pub fn match_window(
     None
 }
 pub fn restore(saved: &[SavedWindow]) -> Result<RestoreReport, String> {
+    let _dpi = DpiGuard::new();
     let current = capture()?;
     let mut used = HashSet::new();
     let mut report = RestoreReport {
@@ -186,8 +213,9 @@ pub fn restore(saved: &[SavedWindow]) -> Result<RestoreReport, String> {
             } else if w.maximized {
                 SW_SHOWMAXIMIZED.0 as u32
             } else {
-                SW_SHOWNOACTIVATE.0 as u32
+                SW_RESTORE.0 as u32
             },
+            flags: WPF_ASYNCWINDOWPLACEMENT,
             ptMinPosition: POINT { x: -1, y: -1 },
             ptMaxPosition: POINT { x: -1, y: -1 },
             rcNormalPosition: RECT {
@@ -218,6 +246,8 @@ mod tests {
             rect: [0, 0, 100, 100],
             maximized: false,
             minimized: false,
+            launch: None,
+            restore_only: false,
         }
     }
     #[test]

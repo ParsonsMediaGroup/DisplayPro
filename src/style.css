@@ -608,3 +608,13 @@ dialog::backdrop {
   color: #ffdee7;
   overflow-wrap: anywhere;
 }
+
+.slot-launch {
+  padding: 12px 0;
+}
+.slot-launch summary {
+  cursor: pointer;
+}
+.slot-launch label {
+  margin-top: 10px;
+}

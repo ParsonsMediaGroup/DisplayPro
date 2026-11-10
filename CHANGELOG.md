@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2 - 2026-11-09
+
+- Track windows across title changes and keep slot assignments stable as apps start.
+- Request new windows explicitly for supported apps, and resolve PyCharm project folders.
+- Add per-window launch overrides and restore-only slots; do not launch bare script interpreters as substitutes for saved tasks.
+- Use explicit DPI awareness, normal-state restoration, and bounded placement settling for late app resizes.
+- Report expected/found/positioned counts and retain a private launch report.
+- Expand native regression tests to delayed title/size changes, missing-window refill, cross-monitor placement and minimized windows.
+
 ## 0.2.1 ? 2026-11-09
 
 - Load & apply now changes monitor profiles immediately with the existing confirmation countdown; Preview only remains available.

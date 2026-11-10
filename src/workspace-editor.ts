@@ -7,12 +7,29 @@ export type WindowSlot = {
   rect: number[];
   maximized: boolean;
   minimized: boolean;
+  launch?: LaunchCommand | null;
+  restore_only?: boolean;
 };
 export type LaunchCommand = {
   exe: string;
   args: string[];
   working_dir: string;
 };
+export function automaticArgs(exe: string): string[] {
+  switch (exe.split(/[\\/]/).pop()?.toLowerCase()) {
+    case "termius.exe":
+      return ["--new-window"];
+    case "firefox.exe":
+    case "chrome.exe":
+    case "msedge.exe":
+      return ["--new-window", "about:blank"];
+    case "windowsterminal.exe":
+    case "wt.exe":
+      return ["-w", "new"];
+    default:
+      return [];
+  }
+}
 const esc = (s: unknown) =>
   String(s ?? "").replace(
     /[&<>"']/g,
@@ -38,19 +55,19 @@ export function windowEditor(
   startup: LaunchCommand | null,
 ) {
   const apps = [...new Set(windows.map((w) => w.exe))];
-  return `<h3>Applications and quantities</h3><p class="help">Each selected window is one slot. Open and load reuses open windows and launches missing ones. For browsers or other single-instance apps, supply their new-window argument. No app launches until you click Open and load.</p>
+  return `<h3>Applications and quantities</h3><p class="help">Each selected window is one slot. Open and load reuses open windows and launches missing ones. For browsers or other single-instance apps, automatic new-window arguments are provided for supported apps unless overridden. No app launches until you click Open and load.</p>
   <div class="toolbar"><button data-action="add-app">+ Add application</button></div>
   ${apps
     .map((exe, i) => {
       const cmd = commands.find(
         (c) => c.exe.toLowerCase() === exe.toLowerCase(),
       );
-      return `<section class="launch-app"><strong>${esc(exe.split("\\").pop())}</strong><small>${esc(exe)}</small><div class="row"><label>Quantity<input type="number" min="0" max="30" data-quantity="${esc(exe)}" value="${windows.filter((w, j) => w.exe === exe && chosen.has(j)).length}"></label><label class="grow">Arguments (JSON array)<input data-command="${esc(exe)}" data-command-field="args" value="${esc(JSON.stringify(cmd?.args ?? []))}" placeholder='["--new-window"]'></label></div><label>Working folder (optional)<input data-command="${esc(exe)}" data-command-field="working_dir" value="${esc(cmd?.working_dir ?? "")}"></label></section>`;
+      return `<section class="launch-app"><strong>${esc(exe.split("\\").pop())}</strong><small>${esc(exe)}</small><div class="row"><label>Quantity<input type="number" min="0" max="30" data-quantity="${esc(exe)}" value="${windows.filter((w, j) => w.exe === exe && chosen.has(j)).length}"></label><label class="grow">Arguments (JSON array)<input data-command="${esc(exe)}" data-command-field="args" value="${esc(JSON.stringify(cmd?.args ?? automaticArgs(exe)))}" placeholder='["--new-window"]'></label></div><label>Working folder (optional)<input data-command="${esc(exe)}" data-command-field="working_dir" value="${esc(cmd?.working_dir ?? "")}"></label></section>`;
     })
     .join("")}
   <h3>Window layout</h3>${layoutPreview(windows, chosen)}
-  <div class="window-list">${windows.map((w, i) => `<section class="window-slot"><label class="check"><input type="checkbox" data-window="${i}" ${chosen.has(i) ? "checked" : ""}><strong>${i + 1}. ${esc(w.title)}</strong></label><div class="slot-fields">${["X", "Y", "Width", "Height"].map((label, j) => `<label>${label}<input type="number" step="1" min="${j < 2 ? -100000 : 1}" max="100000" data-slot="${i}" data-geometry="${j}" value="${j < 2 ? w.rect[j] : w.rect[j] - w.rect[j - 2]}"></label>`).join("")}<label>State<select data-slot="${i}" data-state="true"><option value="normal" ${!w.maximized && !w.minimized ? "selected" : ""}>Normal</option><option value="maximized" ${w.maximized ? "selected" : ""}>Maximized</option><option value="minimized" ${w.minimized ? "selected" : ""}>Minimized</option></select></label></div></section>`).join("")}</div>
-  <details class="startup-editor"><summary>Advanced startup script / command</summary><p class="help">Optional: runs once before apps open and must finish successfully. Enter an interpreter executable (for example powershell.exe’s full path), then arguments such as ["-NoProfile", "-File", "C:\\\\Scripts\\\\work.ps1"]. The entire operation has a 120-second limit. Commands run as your Windows user. Imported commands run only when you explicitly open a profile.</p><label>Executable<input id="startup-exe" value="${esc(startup?.exe ?? "")}"></label><label>Arguments (JSON array)<input id="startup-args" value="${esc(JSON.stringify(startup?.args ?? []))}"></label><label>Working folder<input id="startup-dir" value="${esc(startup?.working_dir ?? "")}"></label></details>`;
+  <div class="window-list">${windows.map((w, i) => `<section class="window-slot"><label class="check"><input type="checkbox" data-window="${i}" ${chosen.has(i) ? "checked" : ""}><strong>${i + 1}. ${esc(w.title)}</strong></label><div class="slot-fields">${["X", "Y", "Width", "Height"].map((label, j) => `<label>${label}<input type="number" step="1" min="${j < 2 ? -100000 : 1}" max="100000" data-slot="${i}" data-geometry="${j}" value="${j < 2 ? w.rect[j] : w.rect[j] - w.rect[j - 2]}"></label>`).join("")}<label>State<select data-slot="${i}" data-state="true"><option value="normal" ${!w.maximized && !w.minimized ? "selected" : ""}>Normal</option><option value="maximized" ${w.maximized ? "selected" : ""}>Maximized</option><option value="minimized" ${w.minimized ? "selected" : ""}>Minimized</option></select></label></div><label class="check"><input type="checkbox" data-slot-restore="${i}" ${w.restore_only ? "checked" : ""}> Restore only — do not launch when missing</label><details class="slot-launch"><summary>Launch settings for this window</summary><label class="check"><input type="checkbox" data-slot-override="${i}" ${w.launch ? "checked" : ""}> Override this window’s launch command</label>${w.launch ? `<label>Executable<input data-slot-launch="${i}" data-slot-launch-field="exe" value="${esc(w.launch.exe)}"></label><label>Arguments (JSON array)<input data-slot-launch="${i}" data-slot-launch-field="args" value="${esc(JSON.stringify(w.launch.args))}"></label><label>Working folder<input data-slot-launch="${i}" data-slot-launch-field="working_dir" value="${esc(w.launch.working_dir)}"></label>` : '<p class="help">Uses the application command above, or automatic new-window arguments for supported apps. Set a per-window command for a particular project, folder, or script.</p>'}</details></section>`).join("")}</div>
+  <details class="startup-editor"><summary>Advanced startup script / command</summary><p class="help">Optional: runs once before apps open and must finish successfully. Enter an interpreter executable (for example powershell.exe’s full path), then arguments such as ["-NoProfile", "-File", "C:\\\\Scripts\\\\work.ps1"]. The launch phase has a 180-second limit. Commands run as your Windows user. Imported commands run only when you explicitly open a profile.</p><label>Executable<input id="startup-exe" value="${esc(startup?.exe ?? "")}"></label><label>Arguments (JSON array)<input id="startup-args" value="${esc(JSON.stringify(startup?.args ?? []))}"></label><label>Working folder<input id="startup-dir" value="${esc(startup?.working_dir ?? "")}"></label></details>`;
 }
 export function resizeQuantity(
   windows: WindowSlot[],

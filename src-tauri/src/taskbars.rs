@@ -1135,6 +1135,8 @@ mod tests {
             rect: [0, 0, 100, 100],
             maximized: false,
             minimized: false,
+            launch: None,
+            restore_only: false,
         }
     }
     #[test]

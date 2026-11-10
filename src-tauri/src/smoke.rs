@@ -32,10 +32,28 @@ pub fn test_window(title: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         let started = Instant::now();
         let mut msg = MSG::default();
-        while IsWindow(Some(hwnd)).as_bool() && started.elapsed() < Duration::from_secs(15) {
+        let mut changed = false;
+        while IsWindow(Some(hwnd)).as_bool() && started.elapsed() < Duration::from_secs(45) {
             while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
+            }
+            if title.contains("workspace verification")
+                && !changed
+                && started.elapsed() >= Duration::from_secs(4)
+            {
+                changed = true;
+                let ready = crate::display::wide(&format!("{title} ready"));
+                let _ = SetWindowTextW(hwnd, PCWSTR(ready.as_ptr()));
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    300,
+                    300,
+                    460,
+                    280,
+                    SWP_NOACTIVATE | SWP_NOZORDER,
+                );
             }
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -92,6 +110,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         if report.restored != 1 {
             return Err(format!("Window restore failed: {:?}", report.skipped));
         }
+        std::thread::sleep(Duration::from_millis(150));
         let restored = crate::layouts::capture()?
             .into_iter()
             .find(|w| w.handle == window.handle)
@@ -184,10 +203,18 @@ pub fn workspace_run(path: &Path) -> Result<(), String> {
         rect: [80, 80, 600, 400],
         maximized: false,
         minimized: false,
+        launch: None,
+        restore_only: false,
     };
     // Windows reports the built-in class name as Static.
     let mut second = slot.clone();
     second.rect = [700, 80, 1220, 400];
+    if let Some(m) = crate::display::enumerate(false)?
+        .iter()
+        .find(|m| m.enabled && !m.primary)
+    {
+        second.rect = [m.x + 80, m.y + 80, m.x + 600, m.y + 400];
+    }
     let profile = crate::Profile {
         id: "test-workspace".into(),
         name: "Synthetic test".into(),
@@ -212,14 +239,51 @@ pub fn workspace_run(path: &Path) -> Result<(), String> {
         if again.launched != 0 || again.restored != 2 || !again.skipped.is_empty() {
             return Err("Reopening the workspace did not reuse its two windows.".into());
         }
+        let current = crate::layouts::capture()?;
+        let closing = current
+            .iter()
+            .find(|w| w.exe.eq_ignore_ascii_case(&exe) && w.title.starts_with(&title))
+            .ok_or("No test window to close")?;
+        unsafe {
+            let _ = PostMessageW(
+                Some(HWND(closing.handle as *mut _)),
+                WM_CLOSE,
+                WPARAM(0),
+                LPARAM(0),
+            );
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        let missing = crate::workspace::open(&profile)?;
+        if missing.launched != 1 || missing.restored != 2 || !missing.skipped.is_empty() {
+            return Err(format!(
+                "Missing-window refill failed: launched {}, restored {}, skipped {:?}",
+                missing.launched, missing.restored, missing.skipped
+            ));
+        }
+        let mut minimized = profile.clone();
+        minimized.windows[1].minimized = true;
+        let minimized_report = crate::workspace::open(&minimized)?;
+        if minimized_report.launched != 0
+            || minimized_report.restored != 2
+            || !minimized_report.skipped.is_empty()
+        {
+            return Err("Minimized-window placement failed.".into());
+        }
+        let normal_report = crate::workspace::open(&profile)?;
+        if normal_report.launched != 0
+            || normal_report.restored != 2
+            || !normal_report.skipped.is_empty()
+        {
+            return Err("Restore from minimized state failed.".into());
+        }
         Ok(
-            serde_json::json!({"success":true,"checks":["launch two missing app windows with arguments","assign duplicate-title windows to separate slots","restore and verify exact positions and sizes","repeat open/load reuses windows without launching duplicates"],"launched":first.launched,"restored":first.restored}),
+            serde_json::json!({"success":true,"checks":["restore on a second monitor when available","minimize and restore normal geometry without relaunching","survive delayed app self-resize and title changes","replace exactly one missing window","launch two missing app windows with arguments","assign duplicate-title windows to separate slots","restore and verify exact positions and sizes","repeat open/load reuses windows without launching duplicates"],"launched":first.launched,"restored":first.restored}),
         )
     })();
     if let Ok(windows) = crate::layouts::capture() {
         for window in windows
             .into_iter()
-            .filter(|w| w.exe.eq_ignore_ascii_case(&exe) && w.title == title)
+            .filter(|w| w.exe.eq_ignore_ascii_case(&exe) && w.title.starts_with(&title))
         {
             unsafe {
                 let _ = PostMessageW(

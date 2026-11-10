@@ -506,7 +506,9 @@ pub fn dispatch(app: &tauri::AppHandle, action: &str) {
             .and_then(|p| workspace::open(&p))
             .map(|r| {
                 format!(
-                    "Opened {} apps; restored {} windows. {}",
+                    "Found {} of {} windows; launched {}; positioned {}. {}",
+                    r.found,
+                    r.requested,
                     r.launched,
                     r.restored,
                     r.skipped.join("; ")

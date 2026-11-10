@@ -1,5 +1,6 @@
 import {
   windowEditor,
+  automaticArgs,
   resizeQuantity,
   type LaunchCommand,
 } from "./workspace-editor";
@@ -41,6 +42,8 @@ type SavedWindow = {
   rect: number[];
   maximized: boolean;
   minimized: boolean;
+  launch?: LaunchCommand | null;
+  restore_only?: boolean;
 };
 type Profile = {
   id: string;
@@ -284,7 +287,7 @@ function render() {
     )
     .join(
       "",
-    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.2.1</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog><dialog id="overwrite-dialog"><h2>Overwrite saved profile?</h2><p>Replace the saved settings for <strong id="overwrite-name"></strong>? This changes the saved profile.</p><div class="toolbar right"><button data-action="cancel-overwrite">Cancel</button><button class="danger" data-action="confirm-overwrite">Overwrite profile</button></div></dialog>`;
+    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.2.2</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog><dialog id="overwrite-dialog"><h2>Overwrite saved profile?</h2><p>Replace the saved settings for <strong id="overwrite-name"></strong>? This changes the saved profile.</p><div class="toolbar right"><button data-action="cancel-overwrite">Cancel</button><button class="danger" data-action="confirm-overwrite">Overwrite profile</button></div></dialog>`;
 }
 function showPending(p: Pending) {
   pending = p;
@@ -433,12 +436,14 @@ root.addEventListener("click", (event) => {
         status("Opening missing apps and loading the layout…");
         const r = await invoke<{
           launched: number;
+          requested: number;
+          found: number;
           restored: number;
           skipped: string[];
         }>("open_window_profile", { id });
         await refresh(false);
         status(
-          `Opened ${r.launched} apps; restored ${r.restored} windows. ${r.skipped.join("; ")}`,
+          `Found ${r.found} of ${r.requested} windows; launched ${r.launched}; positioned ${r.restored}. ${r.skipped.join("; ")}`,
           r.skipped.length > 0,
         );
         break;
@@ -483,14 +488,28 @@ root.addEventListener("click", (event) => {
       case "revert":
         await finish(false);
         break;
-      case "capture":
+      case "capture": {
+        const previous = windows;
         windows = await invoke<SavedWindow[]>("capture_windows");
+        for (const w of windows) {
+          const old = previous.find(
+            (p) =>
+              p.exe === w.exe &&
+              ((p.handle === w.handle && p.pid === w.pid) ||
+                p.title === w.title),
+          );
+          if (old) {
+            w.launch = clone(old.launch ?? null);
+            w.restore_only = old.restore_only ?? false;
+          }
+        }
         chosen = new Set(windows.map((_, i) => i));
         render();
         status(
           `Captured ${windows.length} windows. Uncheck any you don't want to restore.`,
         );
         break;
+      }
       case "select-all":
         chosen = new Set(windows.map((_, i) => i));
         render();
@@ -520,7 +539,7 @@ root.addEventListener("click", (event) => {
             );
         }
         for (const input of document.querySelectorAll<HTMLInputElement>(
-          '[data-command-field="args"],#startup-args',
+          '[data-command-field="args"],[data-slot-launch-field="args"],#startup-args',
         )) {
           const value = JSON.parse(input.value);
           if (!Array.isArray(value) || value.some((v) => typeof v !== "string"))
@@ -673,6 +692,29 @@ root.addEventListener("change", (event) => {
       render();
       return;
     }
+    if (e.dataset.slotRestore !== undefined) {
+      windows[Number(e.dataset.slotRestore)].restore_only = e.checked;
+      return;
+    }
+    if (e.dataset.slotOverride !== undefined) {
+      const w = windows[Number(e.dataset.slotOverride)];
+      w.launch = e.checked ? { exe: w.exe, args: [], working_dir: "" } : null;
+      render();
+      return;
+    }
+    if (e.dataset.slotLaunch !== undefined) {
+      const w = windows[Number(e.dataset.slotLaunch)],
+        field = e.dataset.slotLaunchField;
+      if (!w.launch) return;
+      if (field === "args") {
+        const args = JSON.parse(e.value);
+        if (!Array.isArray(args) || args.some((a) => typeof a !== "string"))
+          throw new Error("Arguments must be a JSON array of strings.");
+        w.launch.args = args;
+      } else if (field === "exe") w.launch.exe = e.value;
+      else w.launch.working_dir = e.value;
+      return;
+    }
     if (e.dataset.slot !== undefined) {
       const w = windows[Number(e.dataset.slot)];
       if (e.dataset.state) {
@@ -694,7 +736,11 @@ root.addEventListener("change", (event) => {
     if (e.dataset.command) {
       let c = launches.find((c) => c.exe === e.dataset.command);
       if (!c) {
-        c = { exe: e.dataset.command, args: [], working_dir: "" };
+        c = {
+          exe: e.dataset.command,
+          args: automaticArgs(e.dataset.command),
+          working_dir: "",
+        };
         launches.push(c);
       }
       if (e.dataset.commandField === "args") {

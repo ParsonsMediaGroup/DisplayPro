@@ -186,7 +186,13 @@ try {
             return;
           case "open_window_profile":
             state.config.selected_window_profile = args.id;
-            return { launched: 2, restored: 3, skipped: [] };
+            return {
+              requested: 3,
+              found: 3,
+              launched: 2,
+              restored: 3,
+              skipped: [],
+            };
           case "restore_windows":
             return { restored: 2, skipped: [] };
           default:
@@ -245,6 +251,16 @@ try {
     .locator('[data-command-field="args"]')
     .first()
     .dispatchEvent("change");
+  await page.locator(".slot-launch summary").first().click();
+  await page.locator('[data-slot-override="0"]').check();
+  await page.locator(".slot-launch summary").first().click();
+  await page
+    .locator('[data-slot-launch="0"][data-slot-launch-field="args"]')
+    .fill('["C:\\\\Projects\\\\Example"]');
+  await page
+    .locator('[data-slot-launch="0"][data-slot-launch-field="args"]')
+    .dispatchEvent("change");
+  await page.locator('[data-slot-restore="1"]').check();
   await page
     .getByRole("button", { name: "Save profile changes", exact: true })
     .click();
@@ -276,6 +292,18 @@ try {
       () => window.__state.config.profiles[0].launches[0].args,
     ),
     ["--new-window"],
+  );
+  assert.deepEqual(
+    await page.evaluate(
+      () => window.__state.config.profiles[0].windows[0].launch.args,
+    ),
+    ["C:\\Projects\\Example"],
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__state.config.profiles[0].windows[1].restore_only,
+    ),
+    true,
   );
   await page.getByRole("button", { name: "Use in dock", exact: true }).click();
   await page.waitForFunction(
