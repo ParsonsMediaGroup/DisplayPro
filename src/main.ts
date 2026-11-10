@@ -205,16 +205,41 @@ async function refresh(reset = true) {
   if (data.lastAction) status(data.lastAction.message, !data.lastAction.ok);
   if (data.startupError) status(data.startupError, true);
 }
+function setMonitorEnabled(m: Monitor, enabled: boolean) {
+  m.enabled = enabled;
+  if (enabled) {
+    if ((!m.width || !m.height || m.hz < 2) && m.modes.length)
+      Object.assign(m, m.modes[0]);
+    const others = draft.filter((c) => c !== m && c.enabled);
+    if (
+      others.some(
+        (c) =>
+          m.x < c.x + c.width &&
+          c.x < m.x + m.width &&
+          m.y < c.y + c.height &&
+          c.y < m.y + m.height,
+      )
+    ) {
+      m.x = Math.max(...others.map((c) => c.x + c.width));
+      m.y = others.find((c) => c.primary)?.y ?? 0;
+    }
+    if (!others.some((c) => c.primary)) m.primary = true;
+  } else if (m.primary) {
+    m.primary = false;
+    const next = draft.find((c) => c.enabled);
+    if (next) next.primary = true;
+  }
+}
 function monitorDiagram() {
+  const disabled = `<div class="disabled-displays">${draft.map((m, i) => (!m.enabled ? `<button data-action="enable-monitor" data-id="${i}" class="disabled-monitor"><b>${i + 1}. ${esc(m.label)}</b><span>Disabled - click to enable</span></button>` : "")).join("")}</div>`;
   const active = draft.filter((m) => m.enabled);
-  if (!active.length)
-    return '<div class="empty">Enable a display to preview this layout.</div>';
+  if (!active.length) return disabled;
   const minX = Math.min(...active.map((m) => m.x));
   const minY = Math.min(...active.map((m) => m.y));
   const w = Math.max(...active.map((m) => m.x + m.width)) - minX;
   const h = Math.max(...active.map((m) => m.y + m.height)) - minY;
   const scale = Math.min(680 / Math.max(w, 1), 190 / Math.max(h, 1));
-  return `<div class="diagram" style="height:${Math.max(180, h * scale + 36)}px"><div class="canvas" style="width:${w * scale}px;height:${h * scale}px">${draft.map((m, i) => (m.enabled ? `<div class="monitor ${m.primary ? "primary" : ""}" style="left:${(m.x - minX) * scale}px;top:${(m.y - minY) * scale}px;width:${m.width * scale}px;height:${m.height * scale}px"><b>${i + 1}</b><span>${m.width} × ${m.height}</span><small>${m.hz} Hz${m.primary ? " · Primary" : ""}</small></div>` : "")).join("")}</div></div>`;
+  return `<div class="diagram" style="height:${Math.max(180, h * scale + 36)}px"><div class="canvas" style="width:${w * scale}px;height:${h * scale}px">${draft.map((m, i) => (m.enabled ? `<div class="monitor ${m.primary ? "primary" : ""}" style="left:${(m.x - minX) * scale}px;top:${(m.y - minY) * scale}px;width:${m.width * scale}px;height:${m.height * scale}px"><b>${i + 1}</b><span>${m.width} × ${m.height}</span><small>${m.hz} Hz${m.primary ? " · Primary" : ""}</small></div>` : "")).join("")}</div></div>${disabled}`;
 }
 function modeOptions(m: Monitor) {
   const modes = [...m.modes];
@@ -287,7 +312,7 @@ function render() {
     )
     .join(
       "",
-    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.2.2</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog><dialog id="overwrite-dialog"><h2>Overwrite saved profile?</h2><p>Replace the saved settings for <strong id="overwrite-name"></strong>? This changes the saved profile.</p><div class="toolbar right"><button data-action="cancel-overwrite">Cancel</button><button class="danger" data-action="confirm-overwrite">Overwrite profile</button></div></dialog>`;
+    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.2.3</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog><dialog id="overwrite-dialog"><h2>Overwrite saved profile?</h2><p>Replace the saved settings for <strong id="overwrite-name"></strong>? This changes the saved profile.</p><div class="toolbar right"><button data-action="cancel-overwrite">Cancel</button><button class="danger" data-action="confirm-overwrite">Overwrite profile</button></div></dialog>`;
 }
 function showPending(p: Pending) {
   pending = p;
@@ -468,6 +493,13 @@ root.addEventListener("click", (event) => {
       case "refresh":
         await refresh();
         status("Current Windows settings refreshed.");
+        break;
+      case "enable-monitor":
+        setMonitorEnabled(draft[Number(id)], true);
+        render();
+        status(
+          "Display enabled in preview. Click Test display changes to activate it.",
+        );
         break;
       case "arrange": {
         let x = 0;
@@ -783,14 +815,7 @@ root.addEventListener("change", (event) => {
         break;
       }
       case "enabled":
-        m.enabled = e.checked;
-        if (m.enabled && (!m.width || !m.height || !m.hz) && m.modes.length)
-          Object.assign(m, m.modes[0]);
-        if (!m.enabled && m.primary) {
-          m.primary = false;
-          const next = draft.find((x) => x.enabled);
-          if (next) next.primary = true;
-        }
+        setMonitorEnabled(m, e.checked);
         break;
       case "primary":
         for (const c of draft) c.primary = c === m;

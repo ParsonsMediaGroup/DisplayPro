@@ -1,6 +1,6 @@
 # DisplayProLite
 
-**Version: 0.2.2 — workspace launch preview.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
+**Version: 0.2.3 — workspace launch preview.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
 
 A local Windows desktop utility built with Tauri 2, Rust, TypeScript and native Windows APIs. Source lives in this project folder; no account or server is required.
 
@@ -110,7 +110,9 @@ Copy `.env.example` to `.env.local` if you need private overrides. Never commit 
 
 `AGENTS.md` defines the public-repository rules. `.gitignore` excludes instance settings, environment files, signing material, diagnostics, test screenshots, dependencies and builds. Run the public-file audit and manually inspect staged changes before pushing; pattern scanning alone cannot prove the absence of secrets.
 
-## Validation status for 0.2.2
+## Validation status for 0.2.3
+
+Disabled displays reported by Windows appear as clickable tiles in Monitor arrangement. Click a tile to enable it in the preview, then Test display changes and Keep changes. If its saved position overlaps an active screen, it is placed to the right for editing. Profile application automatically enables saved active screens and disables other connected screens, including screens omitted from older profiles. Missing required screens block application; disconnected inactive screens do not. All changes retain the 25-second rollback. Physical activation of disabled outputs still requires interactive acceptance testing on the target hardware.
 
 Native smoke checks cover mode validation without applying changes, exact restore of a dedicated temporary window, hotkey registration/conflicts, and profile persistence. The workspace test launches two synthetic windows that change titles and resize themselves after startup, verifies stable placement across monitors when available, repeats loading without duplicates, replaces exactly one closed window, and tests minimized/normal state restoration. Rust tests cover layout validation, window matching, taskbar monitor filtering/pinning, media filtering, local environment parsing and settings bundle validation. The headless Edge dashboard test uses synthetic Windows responses and does not exercise actual native controls.
 

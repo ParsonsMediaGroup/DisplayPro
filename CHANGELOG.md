@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 - 2026-11-10
+
+- Show disabled displays as clickable tiles and prepare nonoverlapping placement when enabling them.
+- Keep detected outputs visible when their saved mode is unavailable.
+- Apply saved enabled/disabled monitor states with timed rollback.
+
 ## 0.2.2 - 2026-11-09
 
 - Track windows across title changes and keep slot assignments stable as apps start.

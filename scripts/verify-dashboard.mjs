@@ -206,6 +206,31 @@ try {
     .getByRole("heading", { name: "Displays, in their place." })
     .waitFor();
   await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(() => {
+    window.__state.monitors[1].enabled = false;
+    window.__state.monitors[1].x = 0;
+  });
+  await page.locator('[data-action="refresh"]').first().click();
+  await page.locator('[data-action="enable-monitor"]').waitFor();
+  await page.locator('[data-action="enable-monitor"]').click();
+  assert.equal(
+    await page.locator('[data-monitor="1"][data-field="enabled"]').isChecked(),
+    true,
+  );
+  assert.equal(
+    await page.locator('[data-monitor="1"][data-field="x"]').inputValue(),
+    "2560",
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__calls.filter((c) => c.command === "apply_displays").length,
+    ),
+    0,
+  );
+  await page.evaluate(() => {
+    window.__state.monitors[1].enabled = true;
+    window.__state.monitors[1].x = 2560;
+  });
   await page.screenshot({
     path: path.join(output, "dashboard-displays.png"),
     fullPage: true,

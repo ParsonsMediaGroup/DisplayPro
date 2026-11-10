@@ -262,6 +262,7 @@ fn begin_display(
     if path.exists() {
         return Err("Keep or revert the pending display change first.".into());
     }
+    monitors = display::resolve_profile(&monitors, &display::enumerate(false)?)?;
     display::normalize(&mut monitors);
     display::test(&monitors)?;
     let id = format!(

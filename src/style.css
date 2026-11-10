@@ -618,3 +618,20 @@ dialog::backdrop {
 .slot-launch label {
   margin-top: 10px;
 }
+
+.disabled-displays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+.disabled-monitor {
+  display: grid;
+  gap: 8px;
+  border: 2px dashed #8793ad;
+  padding: 18px;
+  text-align: left;
+}
+.disabled-monitor span {
+  font-size: 12px;
+}

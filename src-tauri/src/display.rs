@@ -77,7 +77,13 @@ pub fn enumerate(with_modes: bool) -> Result<Vec<Monitor>, String> {
             )
             .as_bool()
             {
-                continue;
+                // A disabled output may not have a saved registry mode.
+                current = dm();
+                let _ = EnumDisplaySettingsW(
+                    PCWSTR(name.as_ptr()),
+                    ENUM_DISPLAY_SETTINGS_MODE(0),
+                    &mut current,
+                );
             }
             let mut modes = vec![];
             if current.dmBitsPerPel == 0 {
@@ -187,6 +193,58 @@ fn friendly_names() -> std::collections::HashMap<String, String> {
         }
     }
     names
+}
+// Build a complete topology: connected outputs not enabled by the profile
+// are disabled, including outputs absent from older saved profiles.
+pub fn resolve_profile(saved: &[Monitor], current: &[Monitor]) -> Result<Vec<Monitor>, String> {
+    let mut resolved: Vec<Monitor> = current
+        .iter()
+        .cloned()
+        .map(|mut m| {
+            m.enabled = false;
+            m.primary = false;
+            m
+        })
+        .collect();
+    let mut used = HashSet::new();
+    for monitor in saved {
+        let matches: Vec<_> = current
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                c.identity == monitor.identity
+                    && (!monitor.identity.is_empty() || c.device == monitor.device)
+            })
+            .collect();
+        let found = matches
+            .iter()
+            .find(|(_, c)| c.device == monitor.device)
+            .or_else(|| {
+                if matches.len() == 1 {
+                    matches.first()
+                } else {
+                    None
+                }
+            });
+        if let Some((index, connected)) = found {
+            if !used.insert(*index) {
+                return Err("Profile contains duplicate displays.".into());
+            }
+            let mut desired = monitor.clone();
+            desired.device = connected.device.clone();
+            desired.identity = connected.identity.clone();
+            desired.label = connected.label.clone();
+            desired.modes = connected.modes.clone();
+            if !desired.enabled {
+                desired.primary = false;
+            }
+            resolved[*index] = desired;
+        } else if monitor.enabled {
+            return Err(format!("Required display {} is not connected or cannot be uniquely identified. Refresh before applying.", monitor.label));
+        }
+    }
+    validate(&resolved)?;
+    Ok(resolved)
 }
 pub fn validate(monitors: &[Monitor]) -> Result<(), String> {
     if monitors.is_empty() || monitors.len() > 32 {
@@ -364,6 +422,22 @@ pub fn apply(monitors: &[Monitor]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn profile_enables_saved_outputs_and_disables_other_connected_outputs() {
+        let current = vec![monitor(0, true), monitor(1920, false)];
+        let saved = vec![monitor(0, true)];
+        let resolved = resolve_profile(&saved, &current).unwrap();
+        assert!(resolved[0].enabled);
+        assert!(!resolved[1].enabled);
+        let mut saved = current.clone();
+        saved[0].enabled = false;
+        saved[0].primary = false;
+        saved[1].primary = true;
+        let resolved = resolve_profile(&saved, &current).unwrap();
+        assert!(!resolved[0].enabled);
+        assert!(resolved[1].enabled && resolved[1].primary);
+        assert!(resolve_profile(&saved, &current[..1]).is_err());
+    }
     #[test]
     fn disabled_mode_uses_documented_detachment_fields() {
         let mut m = monitor(0, false);
