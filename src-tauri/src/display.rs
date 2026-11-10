@@ -255,9 +255,13 @@ pub fn validate(monitors: &[Monitor]) -> Result<(), String> {
         return Err("Exactly one enabled display must be primary.".into());
     }
     let mut names = HashSet::new();
+    let mut identities = HashSet::new();
     for m in monitors {
         if !names.insert(&m.device) {
             return Err("Duplicate display in profile.".into());
+        }
+        if !m.identity.is_empty() && !identities.insert(m.identity.to_ascii_lowercase()) {
+            return Err("Duplicate monitor identity in profile. Refresh the connected displays before saving.".into());
         }
         if m.enabled
             && (m.width < 320
@@ -343,6 +347,13 @@ fn native(m: &Monitor) -> DEVMODEW {
     d
 }
 pub fn test(monitors: &[Monitor]) -> Result<(), String> {
+    match test_legacy(monitors) {
+        Ok(()) => Ok(()),
+        Err(legacy) => crate::display_config::configure(monitors, false)
+            .map_err(|modern| format!("{legacy} {modern}")),
+    }
+}
+fn test_legacy(monitors: &[Monitor]) -> Result<(), String> {
     validate(monitors)?;
     let current = enumerate(false)?;
     for m in monitors {
@@ -388,6 +399,10 @@ pub fn test(monitors: &[Monitor]) -> Result<(), String> {
     Ok(())
 }
 pub fn apply(monitors: &[Monitor]) -> Result<(), String> {
+    if test_legacy(monitors).is_err() {
+        crate::display_config::configure(monitors, false)?;
+        return crate::display_config::configure(monitors, true);
+    }
     // Stage every output before committing the complete topology once.
     for m in monitors
         .iter()
@@ -422,6 +437,15 @@ pub fn apply(monitors: &[Monitor]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejects_duplicate_hardware_identities() {
+        let mut monitors = vec![monitor(0, true), monitor(1920, false)];
+        monitors[0].identity = "monitor-a".into();
+        monitors[1].identity = "MONITOR-A".into();
+        assert!(validate(&monitors).is_err());
+        monitors[1].identity = "monitor-b".into();
+        assert!(validate(&monitors).is_ok());
+    }
     #[test]
     fn profile_enables_saved_outputs_and_disables_other_connected_outputs() {
         let current = vec![monitor(0, true), monitor(1920, false)];

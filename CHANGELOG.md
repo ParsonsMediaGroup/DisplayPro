@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.6 - 2026-11-10
+
+- Validate and apply the complete display topology with SetDisplayConfig when legacy per-output validation fails.
+- Preserve exact requested dimensions, orientation and refresh rate without allowing Windows to substitute modes.
+- Reject duplicate hardware identities when saving monitor profiles.
+- Make profile diagnostics use the same connection matching as profile application.
+
 ## 0.2.5 - 2026-11-10
 
 - Capture and verify actual normal-window bounds instead of stale restore rectangles.

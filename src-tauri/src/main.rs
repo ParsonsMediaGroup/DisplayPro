@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod diagnostics;
 mod display;
+mod display_config;
 mod dock;
 mod environment;
 mod hotkeys;
@@ -639,14 +640,41 @@ fn main() {
         }
         return;
     }
-    if args.get(1).is_some_and(|s| s == "--check-profiles") {
+    if args
+        .get(1)
+        .is_some_and(|s| s == "--check-profiles" || s == "--check-display-paths")
+    {
         if let Some(path) = args.get(2) {
             let result = (|| -> Result<serde_json::Value, String> {
                 let config: Config = serde_json::from_slice(
                     &fs::read(data_dir().join("profiles.json")).map_err(|e| e.to_string())?,
                 )
                 .map_err(|e| e.to_string())?;
-                Ok(serde_json::json!(config.profiles.iter().filter(|p|!p.monitors.is_empty()).map(|p|serde_json::json!({"name":p.name,"validation":display::test(&p.monitors)})).collect::<Vec<_>>()))
+                let current = display::enumerate(false)?;
+                let modern_only = args[1] == "--check-display-paths";
+                let mut reports = config
+                    .profiles
+                    .iter()
+                    .filter(|p| !p.monitors.is_empty())
+                    .map(|p| {
+                        let result = display::resolve_profile(&p.monitors, &current).and_then(
+                            |mut monitors| {
+                                display::normalize(&mut monitors);
+                                if modern_only {
+                                    display_config::configure(&monitors, false)
+                                } else {
+                                    display::test(&monitors)
+                                }
+                            },
+                        );
+                        serde_json::json!({"name":p.name,"validation":result})
+                    })
+                    .collect::<Vec<_>>();
+                if modern_only {
+                    reports.push(serde_json::json!({"name":"Exact native rollback configuration","validation":display_config::validate_current()}));
+                    reports.push(serde_json::json!({"name":"Current desktop (rollback target)","validation":display_config::configure(&current, false)}));
+                }
+                Ok(serde_json::json!(reports))
             })();
             let _ = write_json(Path::new(path), &result);
         }
