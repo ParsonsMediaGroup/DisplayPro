@@ -118,7 +118,7 @@ function displayProfileControls() {
     )
     .join(
       "",
-    )}</select></label><label class="grow">Save as name<input id="display-save-name" maxlength="100" value="${esc(displaySaveName)}" placeholder="Profile name"></label></div><div class="toolbar"><button data-action="load-display-profile" ${!displaySelection ? "disabled" : ""}>Load profile</button><button data-action="save-display-profile">Save monitor profile</button></div><p class="help">Load previews the saved configuration. Test display changes applies it with a 25-second rollback. Saving an existing name requires overwrite confirmation.</p></section>`;
+    )}</select></label><label class="grow">Save as name<input id="display-save-name" maxlength="100" value="${esc(displaySaveName)}" placeholder="Profile name"></label></div><div class="toolbar"><button data-action="load-display-profile" ${!displaySelection ? "disabled" : ""}>Load &amp; apply profile</button><button data-action="preview-display-profile" ${!displaySelection ? "disabled" : ""}>Preview only</button><button data-action="save-display-profile">Save monitor profile</button></div><p class="help">Load applies the saved configuration with a 25-second rollback. Preview only loads it into the editor. Saving an existing name requires overwrite confirmation.</p></section>`;
 }
 async function savePayload(payload: Record<string, unknown>) {
   await invoke("save_profile", payload);
@@ -154,6 +154,17 @@ const esc = (s: unknown) =>
 const clone = <T>(v: T): T => structuredClone(v);
 const short = (path: string) => path.split("\\").pop() ?? path;
 function status(message: string, error = false) {
+  document.querySelector("#error-banner")?.remove();
+  if (error) {
+    const banner = document.createElement("div");
+    banner.id = "error-banner";
+    banner.className = "error-banner";
+    banner.setAttribute("role", "alert");
+    banner.textContent = message;
+    document.querySelector("main")?.prepend(banner);
+    banner.scrollIntoView({ block: "nearest" });
+  }
+
   const el = document.querySelector<HTMLElement>("#status");
   if (el) {
     el.textContent = message;
@@ -273,7 +284,7 @@ function render() {
     )
     .join(
       "",
-    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.2.0</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog><dialog id="overwrite-dialog"><h2>Overwrite saved profile?</h2><p>Replace the saved settings for <strong id="overwrite-name"></strong>? This changes the saved profile.</p><div class="toolbar right"><button data-action="cancel-overwrite">Cancel</button><button class="danger" data-action="confirm-overwrite">Overwrite profile</button></div></dialog>`;
+    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.2.1</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog><dialog id="overwrite-dialog"><h2>Overwrite saved profile?</h2><p>Replace the saved settings for <strong id="overwrite-name"></strong>? This changes the saved profile.</p><div class="toolbar right"><button data-action="cancel-overwrite">Cancel</button><button class="danger" data-action="confirm-overwrite">Overwrite profile</button></div></dialog>`;
 }
 function showPending(p: Pending) {
   pending = p;
@@ -366,6 +377,7 @@ root.addEventListener("click", (event) => {
           await savePayload(pendingSave);
         }
         break;
+      case "preview-display-profile":
       case "load-display-profile": {
         const p = data.config.profiles.find((p) => p.id === displaySelection);
         if (!p) break;
@@ -374,9 +386,10 @@ root.addEventListener("click", (event) => {
           modes: data.monitors.find((c) => c.device === m.device)?.modes ?? [],
         }));
         render();
-        status(
-          `Loaded ${p.name} for preview. Click Test display changes to apply.`,
-        );
+        if (b.dataset.action === "load-display-profile") {
+          status(`Applying ${p.name}?`);
+          await apply(draft);
+        } else status(`Previewing ${p.name}. Your screens have not changed.`);
         break;
       }
       case "save-display-profile": {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 ? 2026-11-09
+
+- Load & apply now changes monitor profiles immediately with the existing confirmation countdown; Preview only remains available.
+- Fix disabled-monitor mode fields and avoid isolated primary-detachment validation failures.
+- Persist display-application errors and show them in a visible error banner.
+- Add read-only saved-profile diagnostics and regression coverage.
+
 ## 0.2.0 — 2026-11-09
 
 - Monitor-profile load/save controls, detected-profile indicator and explicit overwrite guard.

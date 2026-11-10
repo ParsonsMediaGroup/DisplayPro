@@ -598,3 +598,13 @@ dialog h2 {
 dialog::backdrop {
   background: #0009;
 }
+
+.error-banner {
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e68a9f;
+  border-radius: 10px;
+  background: #3b202d;
+  color: #ffdee7;
+  overflow-wrap: anywhere;
+}

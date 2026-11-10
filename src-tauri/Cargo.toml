@@ -1,6 +1,6 @@
 [package]
 name = "displayprolite"
-version = "0.2.0"
+version = "0.2.1"
 description = "Lightweight monitor profiles, window layouts and screensaver control"
 edition = "2021"
 

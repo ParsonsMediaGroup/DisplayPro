@@ -171,6 +171,8 @@ try {
             state.taskbars = args.config;
             return;
           case "apply_displays":
+            if (window.__rejectApply)
+              throw new Error("Windows rejected the synthetic monitor mode");
             state.pending = {
               id: "test-display",
               deadline: Math.floor(Date.now() / 1000) + 25,
@@ -292,7 +294,37 @@ try {
     ),
   );
   await page.locator("#display-profile").selectOption("profile1");
-  await page.getByRole("button", { name: "Load profile", exact: true }).click();
+  await page.getByRole("button", { name: "Preview only", exact: true }).click();
+  const beforeLoad = await page.evaluate(
+    () => window.__calls.filter((c) => c.command === "apply_displays").length,
+  );
+  await page
+    .getByRole("button", { name: "Load & apply profile", exact: true })
+    .click();
+  await page
+    .getByRole("heading", { name: "Keep this display setup?" })
+    .waitFor();
+  assert.equal(
+    await page.evaluate(
+      () => window.__calls.filter((c) => c.command === "apply_displays").length,
+    ),
+    beforeLoad + 1,
+  );
+  await page.getByRole("button", { name: "Keep changes", exact: true }).click();
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await page.evaluate(() => {
+    window.__rejectApply = true;
+  });
+  await page
+    .getByRole("button", { name: "Load & apply profile", exact: true })
+    .click();
+  await page.getByRole("alert").waitFor();
+  assert.ok(
+    (await page.getByRole("alert").innerText()).includes("Windows rejected"),
+  );
+  await page.evaluate(() => {
+    window.__rejectApply = false;
+  });
   const applies = await page.evaluate(
     () => window.__calls.filter((c) => c.command === "apply_displays").length,
   );

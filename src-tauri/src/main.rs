@@ -310,7 +310,15 @@ fn apply_displays(
     state: tauri::State<State>,
     monitors: Vec<display::Monitor>,
 ) -> Result<String, String> {
-    begin_display(&app, &state, monitors)
+    let result = begin_display(&app, &state, monitors);
+    match &result {
+        Err(error) => notify(&app, Err(error.clone())),
+        Ok(_) => notify(
+            &app,
+            Ok("Display profile applied. Keep or revert the change within 25 seconds.".into()),
+        ),
+    }
+    result
 }
 #[tauri::command]
 fn finish_display(state: tauri::State<State>, id: String, keep: bool) -> Result<(), String> {
@@ -612,6 +620,19 @@ fn main() {
             if smoke::workspace_run(Path::new(path)).is_err() {
                 std::process::exit(1);
             }
+        }
+        return;
+    }
+    if args.get(1).is_some_and(|s| s == "--check-profiles") {
+        if let Some(path) = args.get(2) {
+            let result = (|| -> Result<serde_json::Value, String> {
+                let config: Config = serde_json::from_slice(
+                    &fs::read(data_dir().join("profiles.json")).map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(serde_json::json!(config.profiles.iter().filter(|p|!p.monitors.is_empty()).map(|p|serde_json::json!({"name":p.name,"validation":display::test(&p.monitors)})).collect::<Vec<_>>()))
+            })();
+            let _ = write_json(Path::new(path), &result);
         }
         return;
     }

@@ -238,7 +238,37 @@ pub fn normalize(monitors: &mut [Monitor]) {
 }
 fn native(m: &Monitor) -> DEVMODEW {
     let mut d = dm();
-    d.dmFields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
+    if m.enabled {
+        // Start with the driver's complete advertised mode, including its
+        // version and timing flags, rather than constructing an empty DEVMODE.
+        let name = wide(&m.device);
+        for n in 0..4096 {
+            let mut candidate = dm();
+            if !unsafe {
+                EnumDisplaySettingsW(
+                    PCWSTR(name.as_ptr()),
+                    ENUM_DISPLAY_SETTINGS_MODE(n),
+                    &mut candidate,
+                )
+            }
+            .as_bool()
+            {
+                break;
+            }
+            if candidate.dmPelsWidth == m.width
+                && candidate.dmPelsHeight == m.height
+                && candidate.dmDisplayFrequency == m.hz
+                && candidate.dmBitsPerPel == m.bits
+                && unsafe { candidate.Anonymous1.Anonymous2.dmDisplayOrientation.0 }
+                    == m.orientation
+            {
+                d = candidate;
+                break;
+            }
+        }
+    }
+    // Detachment uses a zero-sized mode with DM_POSITION, per Win32 docs.
+    d.dmFields = DM_POSITION;
     d.Anonymous1.Anonymous2.dmPosition = POINTL { x: m.x, y: m.y };
     if m.enabled {
         d.dmPelsWidth = m.width;
@@ -246,16 +276,17 @@ fn native(m: &Monitor) -> DEVMODEW {
         d.dmDisplayFrequency = m.hz;
         d.dmBitsPerPel = m.bits;
         d.Anonymous1.Anonymous2.dmDisplayOrientation = DEVMODE_DISPLAY_ORIENTATION(m.orientation);
-        d.dmFields |= DM_DISPLAYFREQUENCY | DM_BITSPERPEL | DM_DISPLAYORIENTATION;
+        d.dmFields |= DM_PELSWIDTH
+            | DM_PELSHEIGHT
+            | DM_DISPLAYFREQUENCY
+            | DM_BITSPERPEL
+            | DM_DISPLAYORIENTATION;
     }
     d
 }
 pub fn test(monitors: &[Monitor]) -> Result<(), String> {
     validate(monitors)?;
     let current = enumerate(false)?;
-    if current.len() != monitors.len() {
-        return Err("Connected displays changed. Refresh and recapture this profile.".into());
-    }
     for m in monitors {
         if !current
             .iter()
@@ -263,10 +294,28 @@ pub fn test(monitors: &[Monitor]) -> Result<(), String> {
         {
             return Err(format!("Display {} is missing or its connection changed. Refresh and recapture the profile.", m.label));
         }
+        // CDS_TEST checks one output, not a complete staged topology. Testing
+        // detachment of the current primary in isolation can fail even when
+        // another output in this profile becomes primary. Validate enabled
+        // modes here; staged apply and the watchdog protect topology changes.
+        if !m.enabled {
+            continue;
+        }
         let name = wide(&m.device);
         let d = native(m);
         let status = unsafe {
-            ChangeDisplaySettingsExW(PCWSTR(name.as_ptr()), Some(&d), None, CDS_TEST, None)
+            ChangeDisplaySettingsExW(
+                PCWSTR(name.as_ptr()),
+                Some(&d),
+                None,
+                CDS_TEST
+                    | if m.primary {
+                        CDS_SET_PRIMARY
+                    } else {
+                        CDS_TYPE(0)
+                    },
+                None,
+            )
         };
         if status != DISP_CHANGE_SUCCESSFUL {
             return Err(format!(
@@ -274,6 +323,9 @@ pub fn test(monitors: &[Monitor]) -> Result<(), String> {
                 m.label, m.width, m.height, m.hz, status.0
             ));
         }
+    }
+    if current.len() != monitors.len() {
+        return Err("Connected displays changed. Refresh and recapture this profile.".into());
     }
     Ok(())
 }
@@ -312,6 +364,21 @@ pub fn apply(monitors: &[Monitor]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn disabled_mode_uses_documented_detachment_fields() {
+        let mut m = monitor(0, false);
+        m.enabled = false;
+        m.width = 3440;
+        m.height = 1440;
+        let d = native(&m);
+        assert_eq!(d.dmFields, DM_POSITION);
+        assert_eq!(d.dmPelsWidth, 0);
+        assert_eq!(d.dmPelsHeight, 0);
+        m.enabled = true;
+        let d = native(&m);
+        assert!(d.dmFields.contains(DM_PELSWIDTH | DM_PELSHEIGHT));
+        assert_eq!(d.dmPelsWidth, 3440);
+    }
     fn monitor(x: i32, primary: bool) -> Monitor {
         Monitor {
             device: x.to_string(),

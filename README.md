@@ -1,6 +1,6 @@
 # DisplayProLite
 
-**Version: 0.2.0 — workspace launch preview.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
+**Version: 0.2.1 — workspace launch preview.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
 
 A local Windows desktop utility built with Tauri 2, Rust, TypeScript and native Windows APIs. Source lives in this project folder; no account or server is required.
 
@@ -21,7 +21,7 @@ The tray’s Monitor Configuration submenu lists saved monitor profiles. Window 
 
 ## Save, load and launch workspaces
 
-The Displays page shows the profile matching the currently detected monitor layout (or Custom / unsaved), a saved-profile selector, **Load profile**, and **Save monitor profile**. Load previews settings; **Test display changes** applies them with rollback. Saving over an existing profile requires an explicit overwrite confirmation. Saving monitor settings preserves that profile’s window slots and launch commands.
+The Displays page shows the profile matching the currently detected monitor layout (or Custom / unsaved), a saved-profile selector, **Load & apply profile**, and **Save monitor profile**. Load applies the selected profile with a 25-second rollback. **Preview only** loads it into the editor without changing screens; **Test display changes** applies editor changes. Saving over an existing profile requires an explicit overwrite confirmation. Saving monitor settings preserves that profile’s window slots and launch commands.
 
 In Window Positions, capture open windows or add an executable. Set each app’s quantity and edit each window’s X/Y, width/height, and normal/maximized/minimized state. The scaled layout preview shows the saved rectangles. Quantities correspond to window slots; duplicated slots initially share geometry, which you can edit. Load a profile in the editor to revise it, then save (with confirmation for overwrites).
 
@@ -110,8 +110,10 @@ Copy `.env.example` to `.env.local` if you need private overrides. Never commit 
 
 `AGENTS.md` defines the public-repository rules. `.gitignore` excludes instance settings, environment files, signing material, diagnostics, test screenshots, dependencies and builds. Run the public-file audit and manually inspect staged changes before pushing; pattern scanning alone cannot prove the absence of secrets.
 
-## Validation status for 0.2.0
+## Validation status for 0.2.1
 
 Native smoke checks cover mode validation without applying changes, exact restore of a dedicated temporary window, hotkey registration/conflicts, and profile persistence. The workspace test launches two synthetic app windows, verifies both exact placements, then reloads the profile and checks that no duplicate windows launch. Rust tests cover layout validation, window matching, taskbar monitor filtering/pinning, media filtering, local environment parsing and settings bundle validation. The headless Edge dashboard test uses synthetic Windows responses and does not exercise actual native controls.
 
 Interactive native dock menu/hover/auto-hide checks, media playback across actual screens, and end-to-end display rollback still require interactive acceptance testing. This preview should not be described as fully production-validated. Local verification output is intentionally excluded from this public repository.
+
+`--check-profiles <output.json>` validates saved profiles without applying display changes. Disabled outputs follow the [Windows monitor-detachment contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-changedisplaysettingsexw); individual mode tests check enabled outputs, while staged application and rollback protect the full layout.
