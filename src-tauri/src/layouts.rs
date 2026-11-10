@@ -180,6 +180,7 @@ pub fn restore(saved: &[SavedWindow]) -> Result<RestoreReport, String> {
     let monitors = crate::display::enumerate(false)?;
     for w in saved {
         let Some(i) = match_window(w, &current, &used) else {
+            crate::diagnostics::event("placement_unmatched", crate::diagnostics::window(w));
             report
                 .skipped
                 .push(format!("{} — closed or ambiguous", w.title));
@@ -226,7 +227,28 @@ pub fn restore(saved: &[SavedWindow]) -> Result<RestoreReport, String> {
             },
             ..Default::default()
         };
-        match unsafe { SetWindowPlacement(HWND(c.handle as *mut _), &p) } {
+        let hwnd = HWND(c.handle as *mut _);
+        let outcome = unsafe { SetWindowPlacement(hwnd, &p) };
+        let mut outer = RECT::default();
+        let outer_result = unsafe { GetWindowRect(hwnd, &mut outer) };
+        let mut measured = WINDOWPLACEMENT {
+            length: size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
+        let measured_result = unsafe { GetWindowPlacement(hwnd, &mut measured) };
+        crate::diagnostics::event(
+            "placement_attempt",
+            serde_json::json!({
+                "requested":crate::diagnostics::window(w), "matched_before":crate::diagnostics::window(c),
+                "applied_rect":[l,t,r,b], "adjusted_for_reachability":w.rect != [l,t,r,b],
+                "api_error":outcome.as_ref().err().map(|e|e.to_string()),
+                "dpi":unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) },
+                "immediate_outer_rect":outer_result.is_ok().then_some([outer.left,outer.top,outer.right,outer.bottom]),
+                "immediate_normal_rect":measured_result.is_ok().then_some([measured.rcNormalPosition.left,measured.rcNormalPosition.top,measured.rcNormalPosition.right,measured.rcNormalPosition.bottom]),
+                "measurement_note":"SetWindowPlacement is asynchronous; workspace_final records settled measurements"
+            }),
+        );
+        match outcome {
             Ok(()) => report.restored += 1,
             Err(e) => report.skipped.push(format!("{} — {}", w.title, e)),
         }

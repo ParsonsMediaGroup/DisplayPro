@@ -423,6 +423,27 @@ try {
     path: path.join(output, "dashboard-hotkeys.png"),
     fullPage: true,
   });
+  const namedProfile = await page.evaluate(() =>
+    window.__state.config.profiles.find(
+      (p) => p.windows.length && p.monitors.length,
+    ),
+  );
+  assert.ok(namedProfile);
+  const actionSelect = page.locator('[data-binding="0"][data-kind="action"]');
+  for (const [prefix, label] of [
+    ["display", "Monitor configuration"],
+    ["open-load", "Open and load windows"],
+    ["windows", "Restore open windows"],
+  ]) {
+    await actionSelect.selectOption({
+      label: `${label}: ${namedProfile.name}`,
+    });
+    await page.getByRole("button", { name: "Save shortcuts" }).click();
+    await page.waitForFunction(
+      (action) => window.__state.config.hotkeys[0].action === action,
+      `${prefix}:${namedProfile.id}`,
+    );
+  }
   await page.locator('[data-page="screensaver"]').click();
   await page.locator('[data-action="photo-browse"]').first().click();
   await page.waitForFunction(

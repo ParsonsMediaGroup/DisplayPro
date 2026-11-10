@@ -18,6 +18,8 @@ private_dirs = {'verification', 'settings-imports', 'settings-exports', 'setting
 failures = []
 for name in filter(None, tracked):
     path = Path(name)
+    if path.suffix.lower() == '.log':
+        failures.append((name, 'private diagnostic log'))
     if any(part in private_dirs for part in path.parts) or path.name in {'profiles.json', 'photos.json', 'taskbars.json', 'pending.json', 'last-workspace-report.json', 'last-action.json', 'dock-request.json', 'instance.lock'} or (path.name.startswith('.env') and path.name != '.env.example') or '.displayprolite-settings.' in name or path.suffix.lower() in {'.pem', '.key', '.p12', '.pfx', '.exe', '.scr', '.msi', '.dmp'}:
         failures.append((name, 'private/generated filename'))
     # Audit the actual index content that would be committed, not a possibly

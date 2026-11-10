@@ -154,7 +154,16 @@ fn validate(bundle: &Bundle) -> Result<(), String> {
         let Some((kind, id)) = b.action.split_once(':') else {
             return Err("Invalid hotkey action.".into());
         };
-        if !["display", "windows"].contains(&kind) || !ids.contains(&id.to_string()) {
+        if !["display", "windows", "open-load"].contains(&kind)
+            || !bundle.config.profiles.iter().any(|p| {
+                p.id == id
+                    && if kind == "display" {
+                        !p.monitors.is_empty()
+                    } else {
+                        !p.windows.is_empty()
+                    }
+            })
+        {
             return Err("Hotkey refers to an unknown profile.".into());
         }
     }

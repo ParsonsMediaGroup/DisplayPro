@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod diagnostics;
 mod display;
 mod dock;
 mod environment;
@@ -239,8 +240,11 @@ fn delete_profile(
     if new.selected_window_profile.as_deref() == Some(&id) {
         new.selected_window_profile = None;
     }
-    new.hotkeys
-        .retain(|b| b.action != format!("display:{id}") && b.action != format!("windows:{id}"));
+    new.hotkeys.retain(|b| {
+        b.action != format!("display:{id}")
+            && b.action != format!("windows:{id}")
+            && b.action != format!("open-load:{id}")
+    });
     state.hotkeys.update(new.hotkeys.clone())?;
     if let Err(e) = save_config(&state, &new) {
         let _ = state.hotkeys.update(config.hotkeys.clone());
@@ -379,7 +383,16 @@ fn save_hotkeys(state: tauri::State<State>, bindings: Vec<hotkeys::Binding>) -> 
         let Some((kind, id)) = b.action.split_once(':') else {
             return Err("Unknown hotkey action.".into());
         };
-        if !["display", "windows"].contains(&kind) || !config.profiles.iter().any(|p| p.id == id) {
+        if !["display", "windows", "open-load"].contains(&kind)
+            || !config.profiles.iter().any(|p| {
+                p.id == id
+                    && if kind == "display" {
+                        !p.monitors.is_empty()
+                    } else {
+                        !p.windows.is_empty()
+                    }
+            })
+        {
             return Err("Hotkey refers to a missing profile.".into());
         }
     }

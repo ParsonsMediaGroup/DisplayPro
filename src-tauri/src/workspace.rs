@@ -241,7 +241,15 @@ fn in_place(s: &SavedWindow, a: &SavedWindow) -> bool {
         && s.minimized == a.minimized
 }
 pub fn open(profile: &crate::Profile) -> Result<Report, String> {
+    crate::diagnostics::event(
+        "workspace_start",
+        serde_json::json!({"profile":profile.name,"requested":profile.windows.iter().map(crate::diagnostics::window).collect::<Vec<_>>(),"monitors":crate::display::enumerate(false).ok()}),
+    );
     let result = open_inner(profile);
+    crate::diagnostics::event(
+        "workspace_result",
+        serde_json::json!({"profile":profile.name,"result":result}),
+    );
     let _ = crate::write_json(
         &crate::data_dir().join("last-workspace-report.json"),
         &serde_json::json!({"profile":profile.name,"time":crate::now(),"result":result}),
@@ -402,6 +410,10 @@ fn open_inner(profile: &crate::Profile) -> Result<Report, String> {
     let actual = layouts::capture()?;
     bind_slots(&profile.windows, &actual, &mut bound);
     report.found = bound.iter().flatten().count();
+    crate::diagnostics::event(
+        "workspace_final",
+        serde_json::json!({"profile":profile.name,"slots":profile.windows.iter().zip(&bound).map(|(saved, actual)|serde_json::json!({"requested":crate::diagnostics::window(saved),"actual":actual.as_ref().map(crate::diagnostics::window)})).collect::<Vec<_>>()}),
+    );
     let targets = target_windows(&profile.windows, &bound);
     for s in &targets {
         if actual.iter().any(|a| in_place(s, a)) {

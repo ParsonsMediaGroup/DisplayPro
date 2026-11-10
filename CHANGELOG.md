@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4 - 2026-11-10
+
+- Add bounded private window-placement logs with requested/actual geometry, DPI, native API errors, and final workspace measurements.
+
+- Add named Open and load window profile hotkeys alongside monitor configuration and restore-only actions.
+- Support these bindings in private settings import/export and remove them when their profile is deleted.
+
 ## 0.2.3 - 2026-11-10
 
 - Show disabled displays as clickable tiles and prepare nonoverlapping placement when enabling them.
