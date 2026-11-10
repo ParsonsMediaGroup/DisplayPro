@@ -1,0 +1,27 @@
+{
+  "name": "displayprolite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1427 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "test:dashboard": "npm run build && node scripts/verify-dashboard.mjs",
+    "audit:public": "python scripts/audit-public-files.py",
+    "format": "prettier --write src scripts/*.mjs *.json *.md index.html src-tauri/*.json src-tauri/capabilities/*.json",
+    "format:check": "prettier --check src scripts/*.mjs *.json *.md index.html src-tauri/*.json src-tauri/capabilities/*.json"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0",
+    "playwright-core": "1.65.0",
+    "prettier": "3.9.10",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4"
+  }
+}

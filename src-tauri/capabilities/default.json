@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Local desktop controls and screensaver events",
+  "windows": ["main", "photo-*"],
+  "permissions": ["core:default"]
+}

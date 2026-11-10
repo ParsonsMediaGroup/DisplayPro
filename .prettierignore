@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+verification/
+settings-*/
+instance/
+user-data/
+.env*
+*.displayprolite-settings.*

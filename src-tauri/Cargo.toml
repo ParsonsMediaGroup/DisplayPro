@@ -1,0 +1,19 @@
+[package]
+name = "displayprolite"
+version = "0.1.0"
+description = "Lightweight monitor profiles, window layouts and screensaver control"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.5.1", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.9.1", features = ["tray-icon", "image-png", "protocol-asset"] }
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Devices_Display", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_Threading", "Win32_System_Registry", "Win32_System_Com", "Win32_System_Shutdown", "Win32_System_LibraryLoader", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
