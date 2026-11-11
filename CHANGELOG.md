@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.9 - 2026-11-11
+
+- Detect active profiles by physical monitor identities instead of reassigned DISPLAY numbers.
+- Match hotkey profile cycling consistently, including orientation, and ignore disconnected inactive entries.
+- Select monitors directly in the arrangement preview, enable/disable the selected display, and adjust its resolution with a slider using reported modes.
+- Keep at least one monitor enabled and match available modes by physical identity when previewing a saved profile.
+
 ## 0.2.8 - 2026-11-11
 
 - Apply all monitor profiles through the complete display-path API with explicit identity scaling.

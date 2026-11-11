@@ -95,9 +95,10 @@ let pendingSave: Record<string, unknown> | null = null;
 function detectedProfiles() {
   const signature = (ms: Monitor[]) =>
     ms
+      .filter((m) => m.enabled)
       .map((m) =>
         JSON.stringify([
-          m.device,
+          (m.identity || m.device).toLowerCase(),
           m.enabled,
           ...(m.enabled
             ? [m.x, m.y, m.width, m.height, m.hz, m.orientation, m.primary]
@@ -205,7 +206,12 @@ async function refresh(reset = true) {
   if (data.lastAction) status(data.lastAction.message, !data.lastAction.ok);
   if (data.startupError) status(data.startupError, true);
 }
+let selectedMonitor = 0;
 function setMonitorEnabled(m: Monitor, enabled: boolean) {
+  if (!enabled && m.enabled && draft.filter((c) => c.enabled).length === 1) {
+    status("Keep at least one display enabled.", true);
+    return;
+  }
   m.enabled = enabled;
   if (enabled) {
     if ((!m.width || !m.height || m.hz < 2) && m.modes.length)
@@ -230,6 +236,28 @@ function setMonitorEnabled(m: Monitor, enabled: boolean) {
     if (next) next.primary = true;
   }
 }
+function resolutionChoices(m: Monitor) {
+  return [
+    ...new Map(
+      [...m.modes, m].map((v) => [
+        `${v.width},${v.height}`,
+        { width: v.width, height: v.height },
+      ]),
+    ).values(),
+  ].sort(
+    (a, b) => a.width * a.height - b.width * b.height || a.width - b.width,
+  );
+}
+function arrangementControls() {
+  selectedMonitor = Math.min(selectedMonitor, draft.length - 1);
+  const m = draft[selectedMonitor];
+  if (!m) return "";
+  const choices = resolutionChoices(m);
+  const index = choices.findIndex(
+    (v) => v.width === m.width && v.height === m.height,
+  );
+  return `<div class="arrangement-controls"><div class="toolbar"><strong>${selectedMonitor + 1}. ${esc(m.label)}</strong><button data-action="toggle-monitor" data-id="${selectedMonitor}" ${m.enabled && draft.filter((c) => c.enabled).length === 1 ? "disabled" : ""}>${m.enabled ? "Disable" : "Enable"} selected monitor</button></div><label for="arrangement-resolution">Resolution <output id="resolution-value">${m.width} × ${m.height} · ${m.hz} Hz</output></label><input id="arrangement-resolution" type="range" min="0" max="${choices.length - 1}" step="1" value="${index}" data-monitor="${selectedMonitor}" data-field="resolution" aria-valuetext="${m.width} by ${m.height}" ${!m.enabled || choices.length < 2 ? "disabled" : ""}><p class="help">Select a monitor above. Changes stay in preview until you test them.</p></div>`;
+}
 function monitorDiagram() {
   const disabled = `<div class="disabled-displays">${draft.map((m, i) => (!m.enabled ? `<button data-action="enable-monitor" data-id="${i}" class="disabled-monitor"><b>${i + 1}. ${esc(m.label)}</b><span>Disabled - click to enable</span></button>` : "")).join("")}</div>`;
   const active = draft.filter((m) => m.enabled);
@@ -239,7 +267,7 @@ function monitorDiagram() {
   const w = Math.max(...active.map((m) => m.x + m.width)) - minX;
   const h = Math.max(...active.map((m) => m.y + m.height)) - minY;
   const scale = Math.min(680 / Math.max(w, 1), 190 / Math.max(h, 1));
-  return `<div class="diagram" style="height:${Math.max(180, h * scale + 36)}px"><div class="canvas" style="width:${w * scale}px;height:${h * scale}px">${draft.map((m, i) => (m.enabled ? `<div class="monitor ${m.primary ? "primary" : ""}" style="left:${(m.x - minX) * scale}px;top:${(m.y - minY) * scale}px;width:${m.width * scale}px;height:${m.height * scale}px"><b>${i + 1}</b><span>${m.width} × ${m.height}</span><small>${m.hz} Hz${m.primary ? " · Primary" : ""}</small></div>` : "")).join("")}</div></div>${disabled}`;
+  return `<div class="diagram" style="height:${Math.max(180, h * scale + 36)}px"><div class="canvas" style="width:${w * scale}px;height:${h * scale}px">${draft.map((m, i) => (m.enabled ? `<button data-action="select-monitor" data-id="${i}" aria-label="Select monitor ${i + 1}: ${esc(m.label)}" aria-pressed="${selectedMonitor === i}" class="monitor ${m.primary ? "primary" : ""} ${selectedMonitor === i ? "selected" : ""}" style="left:${(m.x - minX) * scale}px;top:${(m.y - minY) * scale}px;width:${m.width * scale}px;height:${m.height * scale}px"><b>${i + 1}</b><span>${m.width} × ${m.height}</span><small>${m.hz} Hz${m.primary ? " · Primary" : ""}</small></button>` : "")).join("")}</div></div>${disabled}`;
 }
 function modeOptions(m: Monitor) {
   const modes = [...m.modes];
@@ -257,7 +285,7 @@ function modeOptions(m: Monitor) {
     .join("");
 }
 function displays() {
-  return `<div class="heading"><div><p class="eyebrow">YOUR WORKSPACE</p><h1>Displays, in their place.</h1><p>Set resolution, refresh rate and arrangement. Save the setup you like.</p></div><button data-action="refresh">↻ Refresh</button></div>${displayProfileControls()}<section class="card topology"><div class="section-head"><h2>Monitor arrangement</h2><span class="badge">${draft.filter((m) => m.enabled).length} active displays</span></div>${monitorDiagram()}<div class="toolbar"><span>Position in desktop pixels. Negative values are supported.</span><button data-action="arrange">Arrange side by side</button></div></section><div class="display-grid">${draft.map((m, i) => `<section class="card display-card"><div class="section-head"><div class="display-title"><span class="number">${i + 1}</span><div><h2>${esc(m.label)}</h2><small>${esc(m.device)}</small></div></div><label class="check"><input type="checkbox" data-monitor="${i}" data-field="enabled" ${m.enabled ? "checked" : ""}> Enabled</label></div><label>Resolution & refresh rate<select data-monitor="${i}" data-field="mode" ${!m.enabled ? "disabled" : ""}>${modeOptions(m)}</select></label><div class="row"><label>X position<input type="number" step="1" min="-100000" max="100000" data-monitor="${i}" data-field="x" value="${m.x}"></label><label>Y position<input type="number" step="1" min="-100000" max="100000" data-monitor="${i}" data-field="y" value="${m.y}"></label></div><label class="check"><input type="radio" name="primary" data-monitor="${i}" data-field="primary" ${m.primary ? "checked" : ""} ${!m.enabled ? "disabled" : ""}> Primary display</label></section>`).join("")}</div><div class="action-bar"><p>Changes revert after 25 seconds unless you keep them.</p><button class="accent" data-action="apply">Test display changes</button></div>`;
+  return `<div class="heading"><div><p class="eyebrow">YOUR WORKSPACE</p><h1>Displays, in their place.</h1><p>Set resolution, refresh rate and arrangement. Save the setup you like.</p></div><button data-action="refresh">↻ Refresh</button></div>${displayProfileControls()}<section class="card topology"><div class="section-head"><h2>Monitor arrangement</h2><span class="badge">${draft.filter((m) => m.enabled).length} active displays</span></div>${monitorDiagram()}${arrangementControls()}<div class="toolbar"><span>Position in desktop pixels. Negative values are supported.</span><button data-action="arrange">Arrange side by side</button></div></section><div class="display-grid">${draft.map((m, i) => `<section class="card display-card"><div class="section-head"><div class="display-title"><span class="number">${i + 1}</span><div><h2>${esc(m.label)}</h2><small>${esc(m.device)}</small></div></div><label class="check"><input type="checkbox" data-monitor="${i}" data-field="enabled" ${m.enabled ? "checked" : ""}> Enabled</label></div><label>Resolution & refresh rate<select data-monitor="${i}" data-field="mode" ${!m.enabled ? "disabled" : ""}>${modeOptions(m)}</select></label><div class="row"><label>X position<input type="number" step="1" min="-100000" max="100000" data-monitor="${i}" data-field="x" value="${m.x}"></label><label>Y position<input type="number" step="1" min="-100000" max="100000" data-monitor="${i}" data-field="y" value="${m.y}"></label></div><label class="check"><input type="radio" name="primary" data-monitor="${i}" data-field="primary" ${m.primary ? "checked" : ""} ${!m.enabled ? "disabled" : ""}> Primary display</label></section>`).join("")}</div><div class="action-bar"><p>Changes revert after 25 seconds unless you keep them.</p><button class="accent" data-action="apply">Test display changes</button></div>`;
 }
 function profiles() {
   return `<div class="heading"><div><p class="eyebrow">READY WHEN YOU ARE</p><h1>Workspace profiles.</h1><p>Save and load app quantities, launch commands, and window layouts.</p></div><button data-action="new-profile">+ New profile</button></div>
@@ -314,7 +342,7 @@ function render() {
     )
     .join(
       "",
-    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.2.8</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog><dialog id="overwrite-dialog"><h2>Overwrite saved profile?</h2><p>Replace the saved settings for <strong id="overwrite-name"></strong>? This changes the saved profile.</p><div class="toolbar right"><button data-action="cancel-overwrite">Cancel</button><button class="danger" data-action="confirm-overwrite">Overwrite profile</button></div></dialog>`;
+    )}</nav><div class="sidebar-bottom"><span class="dot"></span> Ready on demand<small>DisplayProLite · v0.2.9</small></div></aside><main>${page === "displays" ? displays() : page === "profiles" ? profiles() : page === "screensaver" ? screensaver() : page === "taskbars" ? taskbarSettings() : hotkeys()}<footer id="status" role="status" aria-live="polite">Ready. Changes happen only when you apply them.</footer></main><dialog id="confirm-display"><div class="dialog-icon">▣</div><h2>Keep this display setup?</h2><p>The previous layout returns automatically in <strong id="seconds">25</strong> seconds.</p><div class="toolbar right"><button data-action="revert">Revert</button><button class="accent" data-action="keep">Keep changes</button></div></dialog><dialog id="delete-dialog"><h2>Delete this profile?</h2><p>Its saved layout and assigned shortcuts will be removed.</p><div class="toolbar right"><button data-action="cancel-delete">Cancel</button><button class="danger" id="confirm-delete" data-action="confirm-delete">Delete profile</button></div></dialog><dialog id="overwrite-dialog"><h2>Overwrite saved profile?</h2><p>Replace the saved settings for <strong id="overwrite-name"></strong>? This changes the saved profile.</p><div class="toolbar right"><button data-action="cancel-overwrite">Cancel</button><button class="danger" data-action="confirm-overwrite">Overwrite profile</button></div></dialog>`;
 }
 function showPending(p: Pending) {
   pending = p;
@@ -413,7 +441,12 @@ root.addEventListener("click", (event) => {
         if (!p) break;
         draft = p.monitors.map((m) => ({
           ...clone(m),
-          modes: data.monitors.find((c) => c.device === m.device)?.modes ?? [],
+          modes:
+            data.monitors.find((c) =>
+              m.identity
+                ? c.identity.toLowerCase() === m.identity.toLowerCase()
+                : c.device === m.device,
+            )?.modes ?? [],
         }));
         render();
         if (b.dataset.action === "load-display-profile") {
@@ -496,7 +529,16 @@ root.addEventListener("click", (event) => {
         await refresh();
         status("Current Windows settings refreshed.");
         break;
+      case "select-monitor":
+        selectedMonitor = Number(id);
+        render();
+        break;
+      case "toggle-monitor":
+        setMonitorEnabled(draft[Number(id)], !draft[Number(id)].enabled);
+        render();
+        break;
       case "enable-monitor":
+        selectedMonitor = Number(id);
         setMonitorEnabled(draft[Number(id)], true);
         render();
         status(
@@ -811,6 +853,19 @@ root.addEventListener("change", (event) => {
   if (e.dataset.monitor !== undefined) {
     const m = draft[Number(e.dataset.monitor)];
     switch (e.dataset.field) {
+      case "resolution": {
+        const choice = resolutionChoices(m)[Number(e.value)];
+        if (!choice || !m.enabled) break;
+        const rates = m.modes
+          .filter((v) => v.width === choice.width && v.height === choice.height)
+          .map((v) => v.hz);
+        const hz = rates.includes(m.hz)
+          ? m.hz
+          : (rates.sort((a, b) => Math.abs(a - m.hz) - Math.abs(b - m.hz))[0] ??
+            m.hz);
+        Object.assign(m, choice, { hz });
+        break;
+      }
       case "mode": {
         const [width, height, hz] = e.value.split(",").map(Number);
         Object.assign(m, { width, height, hz });

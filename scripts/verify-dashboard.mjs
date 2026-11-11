@@ -206,6 +206,36 @@ try {
     .getByRole("heading", { name: "Displays, in their place." })
     .waitFor();
   await page.evaluate(() => window.scrollTo(0, 0));
+  await page.locator('[data-action="select-monitor"][data-id="0"]').click();
+  await page.locator("#arrangement-resolution").fill("0");
+  await page.locator("#arrangement-resolution").dispatchEvent("change");
+  assert.equal(
+    await page.locator('[data-monitor="0"][data-field="mode"]').inputValue(),
+    "1920,1080,60",
+  );
+  await page.locator('[data-action="select-monitor"][data-id="1"]').click();
+  await page.locator('[data-action="toggle-monitor"]').click();
+  assert.equal(
+    await page.locator('[data-monitor="1"][data-field="enabled"]').isChecked(),
+    false,
+  );
+  await page.locator('[data-action="select-monitor"][data-id="0"]').click();
+  assert.equal(
+    await page.locator('[data-action="toggle-monitor"]').isDisabled(),
+    true,
+  );
+  await page.locator('[data-action="enable-monitor"]').click();
+  assert.equal(
+    await page.locator('[data-monitor="1"][data-field="enabled"]').isChecked(),
+    true,
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__calls.filter((c) => c.command === "apply_displays").length,
+    ),
+    0,
+  );
+  await page.locator('[data-action="refresh"]').first().click();
   await page.evaluate(() => {
     window.__state.monitors[1].enabled = false;
     window.__state.monitors[1].x = 0;
@@ -347,6 +377,18 @@ try {
     ),
   );
   await page.locator("#display-profile").selectOption("profile1");
+  await page.evaluate(() => {
+    window.__state.monitors.forEach((m, i) => {
+      m.device = `renumbered-${i}`;
+    });
+  });
+  await page.locator('[data-action="refresh"]').first().click();
+  assert.ok(
+    (await page.locator(".badge").first().innerText()).includes(
+      "Verification workspace",
+    ),
+  );
+  assert.equal(await page.locator("#display-profile").inputValue(), "profile1");
   await page.getByRole("button", { name: "Preview only", exact: true }).click();
   const beforeLoad = await page.evaluate(
     () => window.__calls.filter((c) => c.command === "apply_displays").length,

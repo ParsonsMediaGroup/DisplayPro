@@ -299,6 +299,28 @@ pub fn normalize(monitors: &mut [Monitor]) {
         }
     }
 }
+pub fn matches_layout(saved: &[Monitor], current: &[Monitor]) -> bool {
+    let active: Vec<_> = saved.iter().filter(|m| m.enabled).collect();
+    !active.is_empty()
+        && active.len() == current.iter().filter(|m| m.enabled).count()
+        && active.iter().all(|a| {
+            current.iter().any(|b| {
+                b.enabled
+                    && (if a.identity.is_empty() {
+                        a.device.eq_ignore_ascii_case(&b.device)
+                    } else {
+                        a.identity.eq_ignore_ascii_case(&b.identity)
+                    })
+                    && a.primary == b.primary
+                    && a.width == b.width
+                    && a.height == b.height
+                    && a.hz == b.hz
+                    && a.x == b.x
+                    && a.y == b.y
+                    && a.orientation == b.orientation
+            })
+        })
+}
 fn native(m: &Monitor) -> DEVMODEW {
     let mut d = dm();
     if m.enabled {
@@ -416,6 +438,19 @@ pub fn apply(monitors: &[Monitor]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn detected_profile_ignores_source_numbers_but_checks_orientation() {
+        let mut saved = vec![monitor(0, true)];
+        saved[0].identity = "physical-lg".into();
+        let mut current = saved.clone();
+        current[0].device = "renumbered-source".into();
+        let mut disabled = monitor(1920, false);
+        disabled.enabled = false;
+        current.push(disabled);
+        assert!(matches_layout(&saved, &current));
+        current[0].orientation = 1;
+        assert!(!matches_layout(&saved, &current));
+    }
     #[test]
     fn profile_follows_hardware_when_disabled_sources_are_renumbered() {
         let mut saved = vec![monitor(0, true), monitor(1920, false)];

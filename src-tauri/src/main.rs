@@ -465,23 +465,9 @@ fn cycle_displays(app: &tauri::AppHandle, state: &State) -> Result<String, Strin
         return Err("Save a monitor profile first.".into());
     }
     let current = display::enumerate(false)?;
-    let active = profiles.iter().position(|p| {
-        p.monitors.len() == current.len()
-            && p.monitors.iter().all(|a| {
-                current.iter().any(|b| {
-                    a.identity == b.identity
-                        && a.device == b.device
-                        && a.enabled == b.enabled
-                        && (!a.enabled
-                            || (a.primary == b.primary
-                                && a.width == b.width
-                                && a.height == b.height
-                                && a.hz == b.hz
-                                && a.x == b.x
-                                && a.y == b.y))
-                })
-            })
-    });
+    let active = profiles
+        .iter()
+        .position(|p| display::matches_layout(&p.monitors, &current));
     let p = &profiles[active.map(|i| (i + 1) % profiles.len()).unwrap_or(0)];
     begin_display(app, state, p.monitors.clone())?;
     Ok(format!("Confirm monitor profile: {}", p.name))

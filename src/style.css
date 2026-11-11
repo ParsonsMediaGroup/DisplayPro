@@ -635,3 +635,36 @@ dialog::backdrop {
 .disabled-monitor span {
   font-size: 12px;
 }
+
+.monitor.selected {
+  outline: 3px solid #b3a0ff;
+  outline-offset: 3px;
+}
+.monitor:focus-visible {
+  outline: 3px solid white;
+  outline-offset: 3px;
+}
+.arrangement-controls {
+  border-top: 1px solid #3a465b;
+  padding-top: 16px;
+  margin-bottom: 18px;
+}
+.arrangement-controls .toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.arrangement-controls label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.arrangement-controls input[type="range"] {
+  width: 100%;
+  padding: 0;
+  accent-color: #b3a0ff;
+  cursor: pointer;
+}
+.arrangement-controls .help {
+  margin: 6px 0 0;
+}
