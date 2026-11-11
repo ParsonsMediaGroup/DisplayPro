@@ -348,11 +348,12 @@ fn native(m: &Monitor) -> DEVMODEW {
     d
 }
 pub fn test(monitors: &[Monitor]) -> Result<(), String> {
-    match test_legacy(monitors) {
-        Ok(()) => Ok(()),
-        Err(legacy) => crate::display_config::configure(monitors, false)
-            .map_err(|modern| format!("{legacy} {modern}")),
-    }
+    crate::display_config::configure(monitors, false).map_err(|modern| {
+        match test_legacy(monitors) {
+            Err(legacy) => format!("{modern} Legacy diagnostic: {legacy}"),
+            Ok(()) => modern,
+        }
+    })
 }
 fn test_legacy(monitors: &[Monitor]) -> Result<(), String> {
     validate(monitors)?;
@@ -409,40 +410,8 @@ fn test_legacy(monitors: &[Monitor]) -> Result<(), String> {
     Ok(())
 }
 pub fn apply(monitors: &[Monitor]) -> Result<(), String> {
-    if test_legacy(monitors).is_err() {
-        crate::display_config::configure(monitors, false)?;
-        return crate::display_config::configure(monitors, true);
-    }
-    // Stage every output before committing the complete topology once.
-    for m in monitors
-        .iter()
-        .filter(|m| m.primary)
-        .chain(monitors.iter().filter(|m| !m.primary))
-    {
-        let name = wide(&m.device);
-        let d = native(m);
-        let flags = CDS_UPDATEREGISTRY
-            | CDS_NORESET
-            | if m.primary {
-                CDS_SET_PRIMARY
-            } else {
-                CDS_TYPE(0)
-            };
-        let status =
-            unsafe { ChangeDisplaySettingsExW(PCWSTR(name.as_ptr()), Some(&d), None, flags, None) };
-        if status != DISP_CHANGE_SUCCESSFUL {
-            return Err(format!("Could not stage {} (code {}).", m.label, status.0));
-        }
-    }
-    let result = unsafe { ChangeDisplaySettingsExW(PCWSTR::null(), None, None, CDS_TYPE(0), None) };
-    if result != DISP_CHANGE_SUCCESSFUL {
-        Err(format!(
-            "Windows could not apply the layout (code {}).",
-            result.0
-        ))
-    } else {
-        Ok(())
-    }
+    crate::display_config::configure(monitors, false)?;
+    crate::display_config::configure(monitors, true)
 }
 #[cfg(test)]
 mod tests {

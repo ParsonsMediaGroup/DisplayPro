@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.8 - 2026-11-11
+
+- Apply all monitor profiles through the complete display-path API with explicit identity scaling.
+- Prefer matching native monitor signal timings over generated integer-refresh timings.
+- Add --apply-profile <name-or-id> to request a guarded switch through the running tray instance.
+
 ## 0.2.7 - 2026-11-11
 
 - Discover physical monitor identities from available Windows display paths instead of GDI child index zero.

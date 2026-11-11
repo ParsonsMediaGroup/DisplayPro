@@ -1,6 +1,6 @@
 # DisplayProLite
 
-**Version: 0.2.7 — workspace launch preview.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
+**Version: 0.2.8 — workspace launch preview.** Public source repository: [ParsonsMediaGroup/DisplayPro](https://github.com/ParsonsMediaGroup/DisplayPro).
 
 A local Windows desktop utility built with Tauri 2, Rust, TypeScript and native Windows APIs. Source lives in this project folder; no account or server is required.
 
@@ -94,7 +94,7 @@ python scripts/audit-public-files.py
 
 The release executable also accepts `--self-test-workspace <output.json>` to launch two temporary test windows, verify exact placement, and check that repeating Open and load does not create duplicates.
 
-The release executable accepts `--diagnose <output.json>` for a read-only inventory and `--self-test <output.json>` for native checks. Self-test creates, moves and restores only its own temporary window, tests current display modes with `CDS_TEST` (does not apply them), verifies hotkey conflicts and checks JSON persistence.
+The release executable accepts `--diagnose <output.json>` for a read-only inventory and `--self-test <output.json>` for native checks. Self-test creates, moves and restores only its own temporary window, validates the current display configuration without applying it, verifies hotkey conflicts and checks JSON persistence.
 
 ## Practical boundaries
 
@@ -110,7 +110,7 @@ Copy `.env.example` to `.env.local` if you need private overrides. Never commit 
 
 `AGENTS.md` defines the public-repository rules. `.gitignore` excludes instance settings, environment files, signing material, diagnostics, test screenshots, dependencies and builds. Run the public-file audit and manually inspect staged changes before pushing; pattern scanning alone cannot prove the absence of secrets.
 
-## Validation status for 0.2.7
+## Validation status for 0.2.8
 
 Disabled displays reported by Windows appear as clickable tiles in Monitor arrangement. Click a tile to enable it in the preview, then Test display changes and Keep changes. If its saved position overlaps an active screen, it is placed to the right for editing. Profile application automatically enables saved active screens and disables other connected screens, including screens omitted from older profiles. Missing required screens block application; disconnected inactive screens do not. All changes retain the 25-second rollback. Physical activation of disabled outputs still requires interactive acceptance testing on the target hardware.
 
@@ -118,7 +118,7 @@ Native smoke checks cover mode validation without applying changes, exact restor
 
 Interactive native dock menu/hover/auto-hide checks, media playback across actual screens, and end-to-end display rollback still require interactive acceptance testing. This preview should not be described as fully production-validated. Local verification output is intentionally excluded from this public repository.
 
-`--check-profiles <output.json>` validates saved profiles without applying display changes. Disabled outputs follow the [Windows monitor-detachment contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-changedisplaysettingsexw); individual mode tests check enabled outputs, while staged application and rollback protect the full layout.
+`--check-profiles <output.json>` validates saved profiles without applying display changes. Complete display-path validation checks enabled outputs together; omitted paths are disabled when applying the configuration. The independent watchdog restores the previous layout if the change is not confirmed.
 
 Window launch results (expected/found/positioned counts and individual failures) are saved privately in `last-workspace-report.json`. Capture and restoration explicitly use per-monitor DPI awareness. Window placement is retried until stable, and the app remains idle between explicit actions. Automatic window launch behavior follows [Firefox](https://firefox-source-docs.mozilla.org/browser/CommandLineParameters.html), [Windows Terminal](https://learn.microsoft.com/en-us/windows/terminal/command-line-arguments), and [PyCharm](https://www.jetbrains.com/help/pycharm/opening-files-from-command-line.html) command-line interfaces; The installed Termius Windows application exposes its `--new-window` launch action.
 
@@ -130,6 +130,8 @@ In Hotkeys & settings, choose Add shortcut, press a key combination, and select 
 
 Normal windows now capture and verify their actual on-screen bounds, converted to the existing workspace coordinate format. This handles snapped windows whose restore rectangles differ from their actual dimensions. Restoration also requests explicit size/position through SetWindowPos. Minimized and maximized windows retain their restore bounds and saved state. Older profiles retain their original saved dimensions; recapture a layout if those dimensions were already incorrect. Coordinate conversion follows the [Windows WINDOWPLACEMENT documentation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-windowplacement).
 
-Display switching falls back to [SetDisplayConfig](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setdisplayconfig) when legacy per-output validation fails. The fallback validates the entire requested topology before applying it, maps physical monitor identities to available paths, uses unrotated source dimensions for portrait screens, retains matching driver signal timings, and preserves the existing independent rollback watchdog. It does not use SDC_ALLOW_CHANGES to silently substitute requested modes. Live read-only validation passed for a disabled 1920x1080 at 60 Hz output with other screens disabled and for the original multi-monitor rollback layout. Physical switching still requires interactive acceptance testing. `--check-display-paths <output.json>` validates saved profiles and the current desktop using this API without changing displays.
+Display switching uses [SetDisplayConfig](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setdisplayconfig) for every profile. This path validates the entire requested topology before applying it, maps physical monitor identities to available paths, uses unrotated source dimensions for portrait screens, retains matching driver signal timings, and preserves the existing independent rollback watchdog. It does not use SDC_ALLOW_CHANGES to silently substitute requested modes. Live read-only validation passed for a disabled 1920x1080 at 60 Hz output with other screens disabled and for the original multi-monitor rollback layout. Physical switching still requires interactive acceptance testing. `--check-display-paths <output.json>` validates saved profiles and the current desktop using this API without changing displays.
 
 Monitor discovery uses available physical targets from QueryDisplayConfig, including connected but disabled monitors. Profile matching follows physical identities even when Windows reassigns DISPLAY numbers. Inactive screens show their preferred mode until activated; saved profiles may still request other validated modes. Read-only validation from a KVM-only desktop verified the return profiles for the connected monitors. A profile requiring physically disconnected hardware is still rejected.
+
+Profile application explicitly requests identity scaling and uses the monitor's preferred native signal timing when its dimensions and rounded refresh rate match the saved profile. The legacy API is used only for diagnostics. `--apply-profile <name-or-id>` requests a switch through the running tray instance and retains the usual 25-second Keep/Revert confirmation.

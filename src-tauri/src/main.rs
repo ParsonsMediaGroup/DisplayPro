@@ -616,6 +616,28 @@ fn watchdog(path: &Path, id: &str) {
 fn main() {
     let env_error = environment::load().err();
     let args: Vec<_> = std::env::args().collect();
+    if args.get(1).is_some_and(|s| s == "--apply-profile") {
+        let result = (|| -> Result<(), String> {
+            let name = args.get(2).ok_or("Provide a monitor profile name or ID.")?;
+            let config = dock::disk_config();
+            let matches: Vec<_> = config
+                .profiles
+                .iter()
+                .filter(|p| {
+                    !p.monitors.is_empty() && (p.id == *name || p.name.eq_ignore_ascii_case(name))
+                })
+                .collect();
+            if matches.len() != 1 {
+                return Err("Monitor profile is missing or ambiguous.".into());
+            }
+            dock::request(&format!("display:{}", matches[0].id))
+        })();
+        if let Err(error) = result {
+            diagnostics::event("profile_request_error", serde_json::json!({"error":error}));
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.get(1).is_some_and(|s| s == "--taskbars") {
         let parent = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(0);
         if let Err(e) = taskbars::run(parent) {

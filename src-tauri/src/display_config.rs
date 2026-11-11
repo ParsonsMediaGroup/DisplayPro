@@ -307,6 +307,46 @@ pub fn configure(monitors: &[Monitor], apply: bool) -> Result<(), String> {
                 }
             }
         }
+        // A rounded refresh request can produce synthetic timings. Prefer
+        // the physical monitor's native signal when it matches the profile.
+        let mut preferred = DISPLAYCONFIG_TARGET_PREFERRED_MODE::default();
+        preferred.header = DISPLAYCONFIG_DEVICE_INFO_HEADER {
+            r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE,
+            size: size_of::<DISPLAYCONFIG_TARGET_PREFERRED_MODE>() as u32,
+            adapterId: path.targetInfo.adapterId,
+            id: path.targetInfo.id,
+        };
+        if unsafe { DisplayConfigGetDeviceInfo(&mut preferred.header) } == 0 {
+            let signal = preferred.targetMode.targetVideoSignalInfo;
+            let hz = if signal.vSyncFreq.Denominator == 0 {
+                0
+            } else {
+                ((signal.vSyncFreq.Numerator as u64 + signal.vSyncFreq.Denominator as u64 / 2)
+                    / signal.vSyncFreq.Denominator as u64) as u32
+            };
+            if signal.activeSize.cx == source_width
+                && signal.activeSize.cy == source_height
+                && hz == monitor.hz
+            {
+                let mode = DISPLAYCONFIG_MODE_INFO {
+                    infoType: DISPLAYCONFIG_MODE_INFO_TYPE_TARGET,
+                    id: path.targetInfo.id,
+                    adapterId: path.targetInfo.adapterId,
+                    Anonymous: DISPLAYCONFIG_MODE_INFO_0 {
+                        targetMode: preferred.targetMode,
+                    },
+                };
+                let index = unsafe { path.targetInfo.Anonymous.modeInfoIdx };
+                if index == u32::MAX {
+                    path.targetInfo.Anonymous.modeInfoIdx = modes.len() as u32;
+                    modes.push(mode);
+                } else {
+                    modes[index as usize] = mode;
+                }
+                path.targetInfo.refreshRate = signal.vSyncFreq;
+                path.targetInfo.scanLineOrdering = signal.scanLineOrdering;
+            }
+        }
         selected.push(path);
     }
     let flags = SDC_USE_SUPPLIED_DISPLAY_CONFIG
