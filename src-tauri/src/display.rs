@@ -139,6 +139,7 @@ pub fn enumerate(with_modes: bool) -> Result<Vec<Monitor>, String> {
             });
         }
     }
+    let result = crate::display_config::inventory(&result, with_modes)?;
     if result.is_empty() {
         Err("Windows reported no configurable displays.".into())
     } else {
@@ -357,6 +358,15 @@ fn test_legacy(monitors: &[Monitor]) -> Result<(), String> {
     validate(monitors)?;
     let current = enumerate(false)?;
     for m in monitors {
+        if m.enabled
+            && current
+                .iter()
+                .any(|c| c.identity.eq_ignore_ascii_case(&m.identity) && !c.enabled)
+        {
+            return Err(
+                "Enabling a disabled monitor requires complete display-path validation.".into(),
+            );
+        }
         if !current
             .iter()
             .any(|c| c.device == m.device && c.identity == m.identity)
@@ -437,6 +447,25 @@ pub fn apply(monitors: &[Monitor]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn profile_follows_hardware_when_disabled_sources_are_renumbered() {
+        let mut saved = vec![monitor(0, true), monitor(1920, false)];
+        saved[0].identity = "physical-lg".into();
+        saved[1].identity = "physical-kvm".into();
+        saved[1].enabled = false;
+        let mut current = saved.clone();
+        current[0].device = saved[1].device.clone();
+        current[0].enabled = false;
+        current[0].primary = false;
+        current[1].device = saved[0].device.clone();
+        current[1].enabled = true;
+        current[1].primary = true;
+        let resolved = resolve_profile(&saved, &current).unwrap();
+        assert_eq!(resolved[0].identity, "physical-lg");
+        assert_eq!(resolved[0].device, current[0].device);
+        assert!(resolved[0].enabled && resolved[0].primary);
+        assert!(!resolved[1].enabled && !resolved[1].primary);
+    }
     #[test]
     fn rejects_duplicate_hardware_identities() {
         let mut monitors = vec![monitor(0, true), monitor(1920, false)];

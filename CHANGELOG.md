@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.7 - 2026-11-11
+
+- Discover physical monitor identities from available Windows display paths instead of GDI child index zero.
+- Keep connected disabled monitors visible when source numbers change after profile switching.
+- Reserve active routes first, use each physical target once, and use whole-topology switching when enabling inactive screens.
+- Show the preferred mode for inactive screens without presenting another output's mode list.
+
 ## 0.2.6 - 2026-11-10
 
 - Validate and apply the complete display topology with SetDisplayConfig when legacy per-output validation fails.

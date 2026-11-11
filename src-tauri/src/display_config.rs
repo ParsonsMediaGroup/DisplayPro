@@ -50,6 +50,115 @@ fn query(
     Err("Displays changed during detection. Refresh and retry.".into())
 }
 
+// GDI child index zero is not a physical-monitor identity after topology
+// changes. Enumerate available targets and reserve active source routes first.
+pub fn inventory(legacy: &[Monitor], with_modes: bool) -> Result<Vec<Monitor>, String> {
+    let (mut paths, _) = query(QDC_ALL_PATHS)?;
+    paths.sort_by_key(|p| p.flags & DISPLAYCONFIG_PATH_ACTIVE == 0);
+    let mut targets = HashSet::new();
+    let mut sources = HashSet::new();
+    let mut result = vec![];
+    for path in paths {
+        if !path.targetInfo.targetAvailable.as_bool() {
+            continue;
+        }
+        let target_key = (
+            path.targetInfo.adapterId.HighPart,
+            path.targetInfo.adapterId.LowPart,
+            path.targetInfo.id,
+        );
+        let source_key = (
+            path.sourceInfo.adapterId.HighPart,
+            path.sourceInfo.adapterId.LowPart,
+            path.sourceInfo.id,
+        );
+        if targets.contains(&target_key) || sources.contains(&source_key) {
+            continue;
+        }
+        let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME::default();
+        target.header = DISPLAYCONFIG_DEVICE_INFO_HEADER {
+            r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+            size: size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32,
+            adapterId: path.targetInfo.adapterId,
+            id: path.targetInfo.id,
+        };
+        let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
+        source.header = DISPLAYCONFIG_DEVICE_INFO_HEADER {
+            r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+            size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+            adapterId: path.sourceInfo.adapterId,
+            id: path.sourceInfo.id,
+        };
+        if unsafe { DisplayConfigGetDeviceInfo(&mut target.header) } != 0
+            || unsafe { DisplayConfigGetDeviceInfo(&mut source.header) } != 0
+        {
+            continue;
+        }
+        let device = text(&source.viewGdiDeviceName);
+        let identity = text(&target.monitorDevicePath);
+        if identity.is_empty() {
+            continue;
+        }
+        let enabled = path.flags & DISPLAYCONFIG_PATH_ACTIVE != 0;
+        let prior = legacy.iter().find(|m| m.device == device);
+        let mut preferred = DISPLAYCONFIG_TARGET_PREFERRED_MODE::default();
+        preferred.header = DISPLAYCONFIG_DEVICE_INFO_HEADER {
+            r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE,
+            size: size_of::<DISPLAYCONFIG_TARGET_PREFERRED_MODE>() as u32,
+            adapterId: path.targetInfo.adapterId,
+            id: path.targetInfo.id,
+        };
+        let has_preferred = unsafe { DisplayConfigGetDeviceInfo(&mut preferred.header) } == 0;
+        let signal = preferred.targetMode.targetVideoSignalInfo;
+        let hz = if has_preferred && signal.vSyncFreq.Denominator > 0 {
+            ((signal.vSyncFreq.Numerator as u64 + signal.vSyncFreq.Denominator as u64 / 2)
+                / signal.vSyncFreq.Denominator as u64) as u32
+        } else {
+            0
+        };
+        let mut monitor = if enabled {
+            prior.cloned().ok_or_else(|| {
+                "An active monitor has no desktop source. Refresh and retry.".to_string()
+            })?
+        } else {
+            Monitor {
+                device: device.clone(),
+                identity: String::new(),
+                label: String::new(),
+                enabled: false,
+                primary: false,
+                x: 0,
+                y: 0,
+                width: preferred.width,
+                height: preferred.height,
+                hz,
+                orientation: 0,
+                bits: 32,
+                modes: vec![],
+            }
+        };
+        monitor.device = device;
+        monitor.identity = identity;
+        monitor.label = text(&target.monitorFriendlyDeviceName);
+        if monitor.label.is_empty() {
+            monitor.label = "Connected monitor".into();
+        }
+        monitor.enabled = enabled;
+        if !enabled && with_modes && has_preferred && hz > 1 {
+            monitor.modes.push(crate::display::Mode {
+                width: preferred.width,
+                height: preferred.height,
+                hz,
+            });
+        }
+        targets.insert(target_key);
+        sources.insert(source_key);
+        result.push(monitor);
+    }
+    result.sort_by(|a, b| a.device.cmp(&b.device));
+    Ok(result)
+}
+
 pub fn validate_current() -> Result<(), String> {
     let (paths, modes) = query(QDC_ONLY_ACTIVE_PATHS)?;
     describe("native", &paths, &modes);
